@@ -37,10 +37,10 @@ TrustVault uses Mongoose and accepts a standard Atlas `mongodb+srv://` connectio
 
 1. In MongoDB Atlas, create a database user with read/write access to only the `trustvault` database. Do not use an Atlas administrative account for the application.
 2. Add only the network addresses you need to the cluster's IP access list. Use your current development address; avoid `0.0.0.0/0` unless your environment requires it.
-3. Use **Connect > Drivers** to copy the connection string, and include the database name `trustvault` before the query string:
-   `mongodb+srv://<username>:<password>@<cluster-host>/trustvault?retryWrites=true&w=majority`
+3. Use **Connect > Drivers** to copy the connection string, and include the database name `trustvault` before the query string. Add `authSource=admin`: Atlas database users authenticate against the `admin` database, not the application database.
+   `mongodb+srv://<username>:<password>@<cluster-host>/trustvault?retryWrites=true&w=majority&authSource=admin`
 4. Put the real URI only in the ignored `server/.env` file as `MONGODB_URI`. Percent-encode special characters in the password. Never commit it, paste it into an issue, or send it in chat.
-5. Start the API. The server validates the URI, connects before listening, explicitly uses the `trustvault` database, and stops startup with a redacted error if the connection fails.
+5. Start the API. The server validates the URI, connects before listening, explicitly uses the `trustvault` database and the `admin` authentication source, and stops startup with a redacted error if the connection fails.
 
 If a database password or JWT secret has been exposed outside its secure environment, treat it as compromised. Rotate the Atlas user's password and generate a new `JWT_SECRET` locally; changing `JWT_SECRET` invalidates existing sessions and requires users to sign in again. This project does not rotate credentials automatically.
 
@@ -111,7 +111,7 @@ All endpoints are prefixed with `/api`. Authentication uses an HttpOnly cookie; 
 | GET | `/documents` | Authenticated; only accessible documents |
 | GET | `/documents/:id` | Owner, admin, or viewer with an active grant |
 | GET | `/documents/:id/download` | Owner/admin or user with an active download grant |
-| PATCH | `/documents/:id` | Owner/admin; `{ "name": "new-name.pdf" }` |
+| PATCH | `/documents/:id` | Owner/admin; set `name` and/or `category` (one of the five categories) |
 | DELETE | `/documents/:id` | Owner or admin |
 | POST | `/documents/:id/permissions` | Owner or admin; `{ "email", "level", "expiresAt?" }` |
 | GET | `/documents/:id/permissions` | Owner or admin |

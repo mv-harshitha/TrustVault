@@ -9,6 +9,7 @@ const navItems = [
   ["audit", "Audit trail", "◷"],
   ["members", "Workspace members", "♙"]
 ];
+const documentCategories = ["Finance", "Legal", "HR", "Operations", "Other"];
 const dateLabel = (date) => new Date(date).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 const sizeLabel = (bytes) => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
@@ -27,13 +28,15 @@ export default function App() {
   const [filters, setFilters] = useState({ name: "", owner: "", category: "", dateFrom: "", dateTo: "" });
 
   const refresh = useCallback(async () => {
-    if (!account) return;
+    if (!account) return false;
     try {
       const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
       const result = await api(`/documents${params.size ? `?${params}` : ""}`);
       setDocuments(result.documents);
+      return true;
     } catch (error) {
       setNotice(error.message);
+      return false;
     }
   }, [account, filters]);
 
@@ -135,6 +138,18 @@ export default function App() {
     }
   }
 
+  async function updateDocument(documentId, changes) {
+    const result = await api(`/documents/${documentId}`, { method: "PATCH", body: JSON.stringify(changes) });
+    setSelected((current) => current && String(current.id) === String(documentId)
+      ? { ...current, name: result.document.name, category: result.document.category }
+      : current);
+    setDocuments((current) => current.map((doc) => String(doc.id) === String(documentId)
+      ? { ...doc, name: result.document.name, category: result.document.category }
+      : doc));
+    const refreshed = await refresh();
+    if (refreshed) setNotice("Document details updated");
+  }
+
   if (account === null) return <div className="boot-screen"><div className="brand-mark">T</div><p>Opening your secure workspace...</p></div>;
   if (!account) return <AuthScreen onSuccess={signIn} />;
 
@@ -165,7 +180,7 @@ export default function App() {
           {page === "overview" && <Overview account={account} documents={documents} events={events} onNavigate={setPage} onOpen={(doc) => { setPage("documents"); openDocument(doc); }} onDownload={downloadDocument} />}
           {page === "upload" && <UploadPage onUploaded={async () => { await refresh(); setPage("documents"); setNotice("Document uploaded securely"); }} onError={setNotice} />}
           {(page === "documents" || page === "shared") && (selected
-            ? <DocumentDetails document={selected} permissions={permissions} events={documentEvents} account={account} onBack={() => setSelected(null)} onView={viewDocument} onDownload={downloadDocument} onDelete={deleteDocument} onError={setNotice} onPermissions={setPermissions} />
+            ? <DocumentDetails document={selected} permissions={permissions} events={documentEvents} account={account} onBack={() => setSelected(null)} onView={viewDocument} onDownload={downloadDocument} onDelete={deleteDocument} onUpdate={updateDocument} onError={setNotice} onPermissions={setPermissions} />
             : <DocumentsPage title={page === "shared" ? "Shared with me" : "My documents"} subtitle={page === "shared" ? "Documents other workspace members have shared with you." : "Documents you own and manage."} documents={filteredDocs} filters={filters} setFilters={setFilters} busy={busy} onOpen={openDocument} onDownload={downloadDocument} />)}
           {page === "audit" && <AuditPage events={events} />}
           {page === "members" && <MembersPage members={members} account={account} onMembers={setMembers} onError={setNotice} />}
@@ -242,7 +257,7 @@ function StatCard({ label, value, icon, accent }) {
 function DocumentsPage({ title, subtitle, documents, filters, setFilters, busy, onOpen, onDownload }) {
   const updateFilter = (key) => (event) => setFilters((current) => ({ ...current, [key]: event.target.value }));
   return <div><div className="page-heading"><div><span className="eyebrow">DOCUMENT LIBRARY</span><h1>{title}</h1><p>{subtitle}</p></div></div>
-    <div className="toolbar document-filters"><label className="search-box"><span>⌕</span><input value={filters.name} onChange={updateFilter("name")} placeholder="Document name" aria-label="Search by document name" /></label><label><input value={filters.owner} onChange={updateFilter("owner")} placeholder="Owner name or email" aria-label="Search by owner" /></label><label><select value={filters.category} onChange={updateFilter("category")} aria-label="Filter by category"><option value="">All categories</option>{["Finance", "Legal", "HR", "Operations", "Other"].map((value) => <option key={value}>{value}</option>)}</select></label><label><input type="date" value={filters.dateFrom} onChange={updateFilter("dateFrom")} aria-label="Uploaded from date" /></label><label><input type="date" value={filters.dateTo} onChange={updateFilter("dateTo")} aria-label="Uploaded to date" /></label><span className="result-count">{documents.length} {documents.length === 1 ? "document" : "documents"}</span></div>
+    <div className="toolbar document-filters"><label className="search-box"><span>⌕</span><input value={filters.name} onChange={updateFilter("name")} placeholder="Document name" aria-label="Search by document name" /></label><label><input value={filters.owner} onChange={updateFilter("owner")} placeholder="Owner name or email" aria-label="Search by owner" /></label><label><select value={filters.category} onChange={updateFilter("category")} aria-label="Filter by category"><option value="">All categories</option>{documentCategories.map((value) => <option key={value}>{value}</option>)}</select></label><label><input type="date" value={filters.dateFrom} onChange={updateFilter("dateFrom")} aria-label="Uploaded from date" /></label><label><input type="date" value={filters.dateTo} onChange={updateFilter("dateTo")} aria-label="Uploaded to date" /></label><span className="result-count">{documents.length} {documents.length === 1 ? "document" : "documents"}</span></div>
     <DocumentTable documents={documents} busy={busy} onOpen={onOpen} onDownload={onDownload} />
   </div>;
 }
@@ -281,7 +296,7 @@ function UploadPage({ onUploaded, onError }) {
     }
   }
   return <div className="upload-layout"><div><div className="page-heading"><span className="eyebrow">ADD TO YOUR LIBRARY</span><h1>Upload a document</h1><p>Files are stored privately and checked before upload.</p></div><form onSubmit={submit} className="upload-form">
-    <label className="upload-category">Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{["Finance", "Legal", "HR", "Operations", "Other"].map((value) => <option key={value}>{value}</option>)}</select></label>
+    <label className="upload-category">Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{documentCategories.map((value) => <option key={value}>{value}</option>)}</select></label>
     <label className={`drop-zone ${dragging ? "dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); setFile(event.dataTransfer.files[0] || null); }}>
       <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={(event) => setFile(event.target.files[0] || null)} />
       <span className="upload-icon">↑</span><strong>{file ? file.name : "Drop your file here, or browse"}</strong><small>{file ? sizeLabel(file.size) : "PDF, PNG or JPEG · Maximum size 10 MB"}</small>
@@ -291,11 +306,61 @@ function UploadPage({ onUploaded, onError }) {
   </form></div><aside className="upload-aside panel"><span className="quick-icon">⌑</span><h3>Protected from the start</h3><p>Your file is validated, assigned a unique storage name, and kept in private storage. The original filename is used only as display metadata.</p><div className="upload-step"><b>01</b><span><strong>File validation</strong><small>Format and size are checked.</small></span></div><div className="upload-step"><b>02</b><span><strong>Private storage</strong><small>No permanent public link.</small></span></div><div className="upload-step"><b>03</b><span><strong>Audit event</strong><small>Upload is recorded for review.</small></span></div></aside></div>;
 }
 
-function DocumentDetails({ document, permissions, events, account, onBack, onView, onDownload, onDelete, onError, onPermissions }) {
+function DocumentDetails({ document, permissions, events, account, onBack, onView, onDownload, onDelete, onUpdate, onError, onPermissions }) {
   const [email, setEmail] = useState("");
   const [level, setLevel] = useState("view");
   const [expiration, setExpiration] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(document.name);
+  const [draftCategory, setDraftCategory] = useState(document.category || "Other");
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState("");
   const canManage = account.role === "admin" || String(document.owner._id) === String(account.user.id);
+  function startEditing() {
+    setDraftName(document.name);
+    setDraftCategory(document.category || "Other");
+    setEditError("");
+    setEditing(true);
+  }
+  function cancelEditing() {
+    if (saving) return;
+    setEditing(false);
+    setEditError("");
+  }
+  async function saveDetails(event) {
+    event.preventDefault();
+    const name = draftName.trim();
+    if (!name) {
+      setEditError("Enter a document name.");
+      return;
+    }
+    if (name.length > 255) {
+      setEditError("Use 255 characters or fewer.");
+      return;
+    }
+    if (/[\\/\u0000-\u001f]/.test(name)) {
+      setEditError("The name cannot contain slashes or control characters.");
+      return;
+    }
+    const currentCategory = document.category || "Other";
+    const changes = {};
+    if (name !== document.name) changes.name = name;
+    if (draftCategory !== currentCategory) changes.category = draftCategory;
+    if (!Object.keys(changes).length) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    setEditError("");
+    try {
+      await onUpdate(document.id, changes);
+      setEditing(false);
+    } catch (error) {
+      setEditError(error.message);
+    } finally {
+      setSaving(false);
+    }
+  }
   async function grant(event) {
     event.preventDefault();
     try {
@@ -320,7 +385,16 @@ function DocumentDetails({ document, permissions, events, account, onBack, onVie
       onError(error.message);
     }
   }
-  return <div><button className="back-button" onClick={onBack}>← Back to documents</button><div className="detail-grid"><div className="detail-main"><div className="detail-title"><span className="file-icon large">{document.mimeType === "application/pdf" ? "PDF" : "IMG"}</span><div><span className="eyebrow">DOCUMENT DETAILS</span><h1>{document.name}</h1><p>Uploaded {dateLabel(document.createdAt)}</p></div></div><div className="panel detail-meta"><h3>File information</h3><div><span>Owner</span><strong>{document.owner.name}</strong></div><div><span>File type</span><strong>{document.mimeType}</strong></div><div><span>File size</span><strong>{sizeLabel(document.size)}</strong></div><div><span>Workspace</span><strong>{account.company.name}</strong></div></div>  <div className="detail-actions"><button className="primary-button" onClick={() => onView(document.id)}>◉ &nbsp; Preview document</button>{document.canDownload && <button className="secondary-button" onClick={() => onDownload(document.id)}>↓ &nbsp; Download</button>}{canManage && <button className="danger-button" onClick={() => onDelete(document.id)}>Delete document</button>}</div></div>
+  return <div><button className="back-button" onClick={onBack}>← Back to documents</button><div className="detail-grid"><div className="detail-main"><div className="detail-title"><span className="file-icon large">{document.mimeType === "application/pdf" ? "PDF" : "IMG"}</span><div><span className="eyebrow">DOCUMENT DETAILS</span><h1>{document.name}</h1><p>Uploaded {dateLabel(document.createdAt)}</p></div></div><div className="panel detail-meta"><h3>File information</h3><div><span>Owner</span><strong>{document.owner.name}</strong></div><div><span>Category</span><strong>{document.category || "Other"}</strong></div><div><span>File type</span><strong>{document.mimeType}</strong></div><div><span>File size</span><strong>{sizeLabel(document.size)}</strong></div><div><span>Workspace</span><strong>{account.company.name}</strong></div></div>  <div className="detail-actions"><button className="primary-button" onClick={() => onView(document.id)}>◉ &nbsp; Preview document</button>{document.canDownload && <button className="secondary-button" onClick={() => onDownload(document.id)}>↓ &nbsp; Download</button>}{canManage && !editing && <button className="secondary-button" onClick={startEditing}>✎ &nbsp; Edit details</button>}{canManage && <button className="danger-button" onClick={() => onDelete(document.id)}>Delete document</button>}</div>
+      {canManage && editing && <form className="panel rename-form" onSubmit={saveDetails}>
+        <h3>Edit document details</h3>
+        <label>Document name<input value={draftName} onChange={(event) => { setDraftName(event.target.value); setEditError(""); }} maxLength={255} autoFocus aria-invalid={Boolean(editError)} aria-describedby={editError ? "document-edit-error" : "document-edit-hint"} /></label>
+        <small className="field-hint" id="document-edit-hint">Up to 255 characters. Slashes are not allowed.</small>
+        <label>Category<select value={draftCategory} onChange={(event) => { setDraftCategory(event.target.value); setEditError(""); }}>{documentCategories.map((value) => <option key={value}>{value}</option>)}</select></label>
+        {editError && <div className="form-error" id="document-edit-error" role="alert">{editError}</div>}
+        <div className="rename-actions"><button className="primary-button" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button><button type="button" className="secondary-button" onClick={cancelEditing} disabled={saving}>Cancel</button></div>
+      </form>}
+    </div>
     {canManage && <aside className="panel permission-panel"><span className="eyebrow">ACCESS CONTROL</span><h2>Manage access</h2><p>Only workspace members can be granted access.</p><form onSubmit={grant} className="grant-form"><label>Member email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" /></label><label>Permission level<select value={level} onChange={(event) => setLevel(event.target.value)}><option value="view">View only</option><option value="download">View and download</option></select></label><label>Expires (optional)<input type="datetime-local" value={expiration} onChange={(event) => setExpiration(event.target.value)} /></label><button className="primary-button full-button">Grant access <span>→</span></button></form><div className="permission-list"><h3>Active permissions <span>{permissions.length}</span></h3>{permissions.length ? permissions.map((permission) => <div className="permission-row" key={permission.id}><span className="mini-avatar">{permission.user.name.slice(0, 1)}</span><span className="permission-user"><strong>{permission.user.name}</strong><small>{permission.user.email} · {permission.level}</small></span><button className="icon-button revoke" title={`Revoke ${permission.user.name}`} onClick={() => revoke(permission.id)}>×</button></div>) : <p className="muted small">No one else has access yet.</p>}</div><div className="permission-list"><h3>Recent document activity</h3>{events.slice(0, 5).map((event) => <div className="activity-mini" key={event._id}><span>{event.action.replaceAll(".", " ")}</span><small>{event.actor?.name || "Unknown"} · {dateLabel(event.createdAt)}</small></div>)}{!events.length && <p className="muted small">No activity recorded yet.</p>}</div></aside>}
   </div></div>;
 }

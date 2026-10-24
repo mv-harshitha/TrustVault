@@ -2,6 +2,10 @@ import mongoose from "mongoose";
 
 const mongodbUriPattern = /^mongodb(?:\+srv)?:\/\//;
 const databaseName = "trustvault";
+// Atlas database users authenticate against the admin database. Without this,
+// the driver inherits the dbName below and authentication fails even with
+// correct credentials.
+const authSource = "admin";
 let connectionPromise = null;
 
 function redactMongoUris(message) {
@@ -26,6 +30,7 @@ export async function connectDatabase(uri = process.env.MONGODB_URI) {
 
   connectionPromise = mongoose.connect(mongoUri, {
     dbName: databaseName,
+    authSource,
     serverSelectionTimeoutMS: 15_000,
     appName: "TrustVault"
   }).then(() => mongoose.connection).catch((error) => {

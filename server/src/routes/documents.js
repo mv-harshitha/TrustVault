@@ -144,6 +144,7 @@ router.get("/:id", asyncHandler(async (req, res) => {
   res.json({ document: {
     id: document._id,
     name: document.name,
+    category: document.category || "Other",
     size: document.size,
     mimeType: document.mimeType,
     createdAt: document.createdAt,
