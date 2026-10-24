@@ -138,7 +138,7 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 - There is no email delivery service; admins must send one-time invitation codes to the matching email out-of-band.
 - User accounts are limited to one workspace in the current interface and API.
 - Only PDF, PNG, and JPEG are accepted. Signature validation is not malware scanning.
-- Search is client-side for the loaded document set. Document and audit list pagination, advanced filtering, audit export, and password-reset/email-verification workflows are not implemented.
+- Document search is server-side by name, workspace member owner name/email, category, and inclusive UTC upload-date range. The filtered list is capped at 200 results; pagination, audit export, and password-reset/email-verification workflows are not implemented.
 - A short-lived signed URL is not used: downloads are proxied through the API to permit an authorization check on every request. This uses server bandwidth and buffers files up to the configured 10 MB limit.
 - During implementation, the workspace router was initially mounted at a path that duplicated `/current`; the mount was corrected to `/api/workspaces` so the defined `/current` endpoints compose correctly. The session cookie was also updated to include an authentication version so logout invalidates the token server-side.
 - Before submission, run the documented tests and build, fix any failures, independently verify deployment, and record any additional corrections actually made.

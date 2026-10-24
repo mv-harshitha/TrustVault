@@ -12,7 +12,7 @@ import { asyncHandler, httpError } from "../middleware/errors.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getDocumentAccess } from "../services/documents.js";
 import { recordAudit } from "../services/audit.js";
-import { documentUpdateSchema, permissionSchema } from "../validators/index.js";
+import { documentCategorySchema, documentSearchSchema, documentUpdateSchema, permissionSchema } from "../validators/index.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
@@ -34,6 +34,11 @@ router.post("/", uploadLimiter, asyncHandler(async (req, _res, next) => {
   if (!req.file) {
     await recordAudit(req, { action: "document.upload", outcome: "failure", metadata: { reason: "missing_file" } });
     throw httpError(400, "A document file is required");
+  }
+  const categoryResult = documentCategorySchema.safeParse(req.body.category || "Other");
+  if (!categoryResult.success) {
+    await recordAudit(req, { action: "document.upload", outcome: "denied", metadata: { reason: "invalid_category" } });
+    throw httpError(400, "Choose a valid document category");
   }
   const detected = await fileTypeFromBuffer(req.file.buffer);
   if (!detected || !allowedTypes.has(detected.mime) || req.file.mimetype !== detected.mime) {
@@ -67,6 +72,7 @@ router.post("/", uploadLimiter, asyncHandler(async (req, _res, next) => {
       company: req.membership.company._id,
       owner: req.user._id,
       name: safeName,
+      category: categoryResult.data,
       storagePath,
       mimeType: detected.mime,
       size: req.file.size
@@ -78,15 +84,14 @@ router.post("/", uploadLimiter, asyncHandler(async (req, _res, next) => {
     if (cleanupError) console.error(`[${req.id}] Failed to remove incomplete upload:`, cleanupError);
     throw error;
   }
-  res.status(201).json({ document: { id: document._id, name: document.name, size: document.size, mimeType: document.mimeType, createdAt: document.createdAt, owner: req.user.name } });
+  res.status(201).json({ document: { id: document._id, name: document.name, category: document.category, size: document.size, mimeType: document.mimeType, createdAt: document.createdAt, owner: req.user.name } });
 }));
 
 router.get("/", asyncHandler(async (req, res) => {
+  const filters = documentSearchSchema.parse(req.query);
   const base = { company: req.membership.company._id };
-  let documents;
-  if (req.membership.role === "admin") {
-    documents = await Document.find(base).populate("owner", "name email").sort({ createdAt: -1 }).limit(200);
-  } else {
+  const clauses = [];
+  if (req.membership.role !== "admin") {
     const permissions = await Permission.find({
       ...base,
       user: req.user._id,
@@ -94,11 +99,32 @@ router.get("/", asyncHandler(async (req, res) => {
       $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
     }).select("document");
     const ids = permissions.map((permission) => permission.document);
-    documents = await Document.find({ ...base, $or: [{ owner: req.user._id }, { _id: { $in: ids } }] })
-      .populate("owner", "name email").sort({ createdAt: -1 }).limit(200);
+    clauses.push({ $or: [{ owner: req.user._id }, { _id: { $in: ids } }] });
   }
+  if (filters.name) clauses.push({ name: { $regex: filters.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" } });
+  if (filters.category) clauses.push(filters.category === "Other"
+    ? { $or: [{ category: "Other" }, { category: { $exists: false } }] }
+    : { category: filters.category });
+  if (filters.owner) {
+    const documentOwnerIds = await Document.distinct("owner", { company: req.membership.company._id });
+    const ownerPattern = new RegExp(filters.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const owners = await User.find({ _id: { $in: documentOwnerIds }, $or: [{ name: ownerPattern }, { email: ownerPattern }] }).distinct("_id");
+    clauses.push({ owner: { $in: owners } });
+  }
+  if (filters.dateFrom || filters.dateTo) {
+    const createdAt = {};
+    if (filters.dateFrom) createdAt.$gte = new Date(`${filters.dateFrom}T00:00:00.000Z`);
+    if (filters.dateTo) {
+      const dayAfter = new Date(`${filters.dateTo}T00:00:00.000Z`);
+      dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
+      createdAt.$lt = dayAfter;
+    }
+    clauses.push({ createdAt });
+  }
+  if (clauses.length) base.$and = clauses;
+  const documents = await Document.find(base).populate("owner", "name email").sort({ createdAt: -1 }).limit(200);
   res.json({ documents: documents.map((doc) => ({
-    id: doc._id, name: doc.name, size: doc.size, mimeType: doc.mimeType,
+    id: doc._id, name: doc.name, category: doc.category || "Other", size: doc.size, mimeType: doc.mimeType,
     createdAt: doc.createdAt, owner: { id: doc.owner._id, name: doc.owner.name }
   })) });
 }));
@@ -295,23 +321,26 @@ router.patch("/:id", asyncHandler(async (req, res) => {
     await recordAudit(req, { action: "document.edit", outcome: "denied", document: document._id, metadata: { reason: "role_not_allowed" } });
     throw httpError(403, "Only the owner or an administrator can edit this document");
   }
-  const { name } = documentUpdateSchema.parse(req.body);
-  const previousName = document.name;
-  document.name = name;
+  const input = documentUpdateSchema.parse(req.body);
+  if (!input.name && !input.category) throw httpError(400, "Provide a document name or category");
+  const previous = { name: document.name, category: document.category };
+  if (input.name) document.name = input.name;
+  if (input.category) document.category = input.category;
   await document.save();
   try {
     await recordAudit(req, {
       action: "document.edit",
       outcome: "success",
       document: document._id,
-      metadata: { fields: ["name"] }
+      metadata: { fields: Object.keys(input) }
     });
   } catch (error) {
-    document.name = previousName;
+    document.name = previous.name;
+    document.category = previous.category;
     await document.save();
     throw error;
   }
-  res.json({ document: { id: document._id, name: document.name, size: document.size, mimeType: document.mimeType, createdAt: document.createdAt } });
+  res.json({ document: { id: document._id, name: document.name, category: document.category, size: document.size, mimeType: document.mimeType, createdAt: document.createdAt } });
 }));
 
 export default router;

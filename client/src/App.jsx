@@ -24,23 +24,27 @@ export default function App() {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState({ name: "", owner: "", category: "", dateFrom: "", dateTo: "" });
 
   const refresh = useCallback(async () => {
     if (!account) return;
     try {
-      const result = await api("/documents");
+      const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
+      const result = await api(`/documents${params.size ? `?${params}` : ""}`);
       setDocuments(result.documents);
     } catch (error) {
       setNotice(error.message);
     }
-  }, [account]);
+  }, [account, filters]);
 
   useEffect(() => {
     api("/auth/me").then(setAccount).catch(() => setAccount(false));
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    const timer = window.setTimeout(refresh, 250);
+    return () => window.clearTimeout(timer);
+  }, [refresh]);
 
   useEffect(() => {
     if ((page === "audit" || page === "overview") && account?.role === "admin") {
@@ -53,9 +57,8 @@ export default function App() {
 
   const filteredDocs = useMemo(() => documents.filter((doc) => {
     const owned = String(doc.owner.id) === String(account?.user?.id);
-    return (page === "shared" ? !owned : page === "documents" ? owned : true)
-      && doc.name.toLowerCase().includes(query.toLowerCase());
-  }), [documents, page, query, account]);
+    return page === "shared" ? !owned : page === "documents" ? owned : true;
+  }), [documents, page, account]);
 
   async function signIn(result) {
     setAccount({
@@ -163,7 +166,7 @@ export default function App() {
           {page === "upload" && <UploadPage onUploaded={async () => { await refresh(); setPage("documents"); setNotice("Document uploaded securely"); }} onError={setNotice} />}
           {(page === "documents" || page === "shared") && (selected
             ? <DocumentDetails document={selected} permissions={permissions} events={documentEvents} account={account} onBack={() => setSelected(null)} onView={viewDocument} onDownload={downloadDocument} onDelete={deleteDocument} onError={setNotice} onPermissions={setPermissions} />
-            : <DocumentsPage title={page === "shared" ? "Shared with me" : "My documents"} subtitle={page === "shared" ? "Documents other workspace members have shared with you." : "Documents you own and manage."} documents={filteredDocs} query={query} setQuery={setQuery} busy={busy} onOpen={openDocument} onDownload={downloadDocument} />)}
+            : <DocumentsPage title={page === "shared" ? "Shared with me" : "My documents"} subtitle={page === "shared" ? "Documents other workspace members have shared with you." : "Documents you own and manage."} documents={filteredDocs} filters={filters} setFilters={setFilters} busy={busy} onOpen={openDocument} onDownload={downloadDocument} />)}
           {page === "audit" && <AuditPage events={events} />}
           {page === "members" && <MembersPage members={members} account={account} onMembers={setMembers} onError={setNotice} />}
         </section>
@@ -236,9 +239,10 @@ function StatCard({ label, value, icon, accent }) {
   return <div className="stat-card"><span className={`stat-icon ${accent}`}>{icon}</span><span className="stat-label">{label}</span><strong className="stat-value">{value}</strong><span className="stat-caption">In this workspace</span></div>;
 }
 
-function DocumentsPage({ title, subtitle, documents, query, setQuery, busy, onOpen, onDownload }) {
+function DocumentsPage({ title, subtitle, documents, filters, setFilters, busy, onOpen, onDownload }) {
+  const updateFilter = (key) => (event) => setFilters((current) => ({ ...current, [key]: event.target.value }));
   return <div><div className="page-heading"><div><span className="eyebrow">DOCUMENT LIBRARY</span><h1>{title}</h1><p>{subtitle}</p></div></div>
-    <div className="toolbar"><label className="search-box"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search documents..." aria-label="Search documents" /></label><span className="result-count">{documents.length} {documents.length === 1 ? "document" : "documents"}</span></div>
+    <div className="toolbar document-filters"><label className="search-box"><span>⌕</span><input value={filters.name} onChange={updateFilter("name")} placeholder="Document name" aria-label="Search by document name" /></label><label><input value={filters.owner} onChange={updateFilter("owner")} placeholder="Owner name or email" aria-label="Search by owner" /></label><label><select value={filters.category} onChange={updateFilter("category")} aria-label="Filter by category"><option value="">All categories</option>{["Finance", "Legal", "HR", "Operations", "Other"].map((value) => <option key={value}>{value}</option>)}</select></label><label><input type="date" value={filters.dateFrom} onChange={updateFilter("dateFrom")} aria-label="Uploaded from date" /></label><label><input type="date" value={filters.dateTo} onChange={updateFilter("dateTo")} aria-label="Uploaded to date" /></label><span className="result-count">{documents.length} {documents.length === 1 ? "document" : "documents"}</span></div>
     <DocumentTable documents={documents} busy={busy} onOpen={onOpen} onDownload={onDownload} />
   </div>;
 }
@@ -246,15 +250,16 @@ function DocumentsPage({ title, subtitle, documents, query, setQuery, busy, onOp
 function DocumentTable({ documents, busy, onOpen, onDownload }) {
   if (busy) return <div className="empty-state">Loading document details...</div>;
   if (!documents.length) return <div className="empty-state"><span className="empty-icon">▤</span><strong>No documents yet</strong><p>Documents you can access will appear here.</p></div>;
-  return <div className="table-wrap"><table><thead><tr><th>DOCUMENT</th><th>OWNER</th><th>UPLOADED</th><th>SIZE</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{documents.map((doc) => <tr key={doc.id}>
+  return <div className="table-wrap"><table><thead><tr><th>DOCUMENT</th><th>CATEGORY</th><th>OWNER</th><th>UPLOADED</th><th>SIZE</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{documents.map((doc) => <tr key={doc.id}>
     <td><button className="document-name" onClick={() => onOpen(doc)}><span className={`file-icon ${doc.mimeType === "application/pdf" ? "pdf" : "image"}`}>{doc.mimeType === "application/pdf" ? "PDF" : "IMG"}</span><span><strong>{doc.name}</strong><small>{doc.mimeType.split("/")[1].toUpperCase()}</small></span></button></td>
-    <td><span className="owner-cell"><span className="mini-avatar">{doc.owner.name.slice(0, 1)}</span>{doc.owner.name}</span></td><td>{dateLabel(doc.createdAt)}</td><td>{sizeLabel(doc.size)}</td>
+    <td>{doc.category || "Other"}</td><td><span className="owner-cell"><span className="mini-avatar">{doc.owner.name.slice(0, 1)}</span>{doc.owner.name}</span></td><td>{dateLabel(doc.createdAt)}</td><td>{sizeLabel(doc.size)}</td>
     <td><div className="row-actions"><button className="icon-button" title="Open details" onClick={() => onOpen(doc)}>•••</button><button className="icon-button" title="Download document" onClick={() => onDownload(doc.id)}>↓</button></div></td>
   </tr>)}</tbody></table></div>;
 }
 
 function UploadPage({ onUploaded, onError }) {
   const [file, setFile] = useState(null);
+  const [category, setCategory] = useState("Other");
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   async function submit(event) {
@@ -264,6 +269,7 @@ function UploadPage({ onUploaded, onError }) {
     try {
       const data = new FormData();
       data.append("file", file);
+      data.append("category", category);
       await api("/documents", { method: "POST", body: data });
       setFile(null);
       event.currentTarget.reset();
@@ -275,6 +281,7 @@ function UploadPage({ onUploaded, onError }) {
     }
   }
   return <div className="upload-layout"><div><div className="page-heading"><span className="eyebrow">ADD TO YOUR LIBRARY</span><h1>Upload a document</h1><p>Files are stored privately and checked before upload.</p></div><form onSubmit={submit} className="upload-form">
+    <label className="upload-category">Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{["Finance", "Legal", "HR", "Operations", "Other"].map((value) => <option key={value}>{value}</option>)}</select></label>
     <label className={`drop-zone ${dragging ? "dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); setFile(event.dataTransfer.files[0] || null); }}>
       <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={(event) => setFile(event.target.files[0] || null)} />
       <span className="upload-icon">↑</span><strong>{file ? file.name : "Drop your file here, or browse"}</strong><small>{file ? sizeLabel(file.size) : "PDF, PNG or JPEG · Maximum size 10 MB"}</small>

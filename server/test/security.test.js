@@ -191,6 +191,24 @@ test("registers and logs in; rejects invalid credentials", async () => {
 
 test("protects routes without a session and revokes a session at logout", async () => {
   assert.equal((await request(app).get("/api/documents")).status, 401);
+  const uploaded = await adminAgent.post("/api/documents").attach("file", png, { filename: "auth-matrix.png", contentType: "image/png" });
+  const id = uploaded.body.document.id;
+  const unauthenticated = request(app);
+  const protectedRequests = [
+    () => unauthenticated.get(`/api/documents/${id}`),
+    () => unauthenticated.get(`/api/documents/${id}/view`),
+    () => unauthenticated.get(`/api/documents/${id}/download`),
+    () => unauthenticated.patch(`/api/documents/${id}`).send({ name: "forged.png" }),
+    () => unauthenticated.delete(`/api/documents/${id}`),
+    () => unauthenticated.get(`/api/documents/${id}/permissions`),
+    () => unauthenticated.post(`/api/documents/${id}/permissions`).send({ email: "x@example.test", level: "view" }),
+    () => unauthenticated.delete(`/api/documents/${id}/permissions/000000000000000000000001`),
+    () => unauthenticated.get("/api/audit-logs"),
+    () => unauthenticated.get(`/api/audit-logs/documents/${id}`)
+  ];
+  const protectedResponses = [];
+  for (const operation of protectedRequests) protectedResponses.push(await operation());
+  assert.deepEqual(protectedResponses.map((response) => response.status), Array(10).fill(401));
   const agent = createAgent();
   await register(agent, "logout@example.test", "Logout Co");
   assert.equal((await agent.post("/api/auth/logout")).status, 204);
@@ -202,12 +220,18 @@ test("uploads verified files, checks MIME and size, and serves downloads after a
     .attach("file", png, { filename: "../../report.png", contentType: "image/png" });
   assert.equal(uploaded.status, 201);
   documentId = uploaded.body.document.id;
+  assert.equal(uploaded.body.document.category, "Other");
+  assert.equal("storagePath" in uploaded.body.document, false);
+  assert.equal("url" in uploaded.body.document, false);
   const safeDocument = await Document.findById(documentId);
   assert.equal(/[\\/\u0000-\u001f\u007f]/.test(safeDocument.name), false);
   assert.equal(safeDocument.name.startsWith("."), false);
   const forbiddenType = await adminAgent.post("/api/documents")
     .attach("file", Buffer.from("not a pdf"), { filename: "report.pdf", contentType: "application/pdf" });
   assert.equal(forbiddenType.status, 400);
+  const invalidCategory = await adminAgent.post("/api/documents").field("category", "Payroll")
+    .attach("file", png, { filename: "invalid-category.png", contentType: "image/png" });
+  assert.equal(invalidCategory.status, 400);
   const oversized = await adminAgent.post("/api/documents")
     .attach("file", Buffer.alloc(10 * 1024 * 1024 + 1, 1), { filename: "large.png", contentType: "image/png" });
   assert.equal(oversized.status, 400);
@@ -240,6 +264,9 @@ test("enforces workspace isolation, grant eligibility, permission level, expiry,
   assert.equal((await viewerAgent.get(`/api/documents/${documentId}/view`)).status, 404);
   assert.equal((await viewerAgent.get(`/api/documents/${documentId}/download`)).status, 404);
   assert.equal((await viewerAgent.delete(`/api/documents/${documentId}`)).status, 404);
+  assert.equal((await viewerAgent.patch(`/api/documents/${documentId}`).send({ name: "cross-workspace.png" })).status, 404);
+  assert.equal((await viewerAgent.get(`/api/documents/${documentId}/permissions`)).status, 404);
+  assert.equal((await viewerAgent.post(`/api/documents/${documentId}/permissions`).send({ email: "outsider@example.test", level: "view" })).status, 404);
 
   const outsider = await User.findOne({ email: "outsider@example.test" });
   const outsiderMembership = await Membership.findOne({ user: outsider._id });
@@ -435,4 +462,48 @@ test("workspace admins can remove only their own members and revoke their grants
   assert.ok(await Permission.exists({ document: uploaded.body.document.id, user: member._id, revokedAt: { $ne: null } }));
   assert.ok(await AuditEvent.exists({ action: "permission.revoke", outcome: "success", "metadata.reason": "member_removed" }));
   assert.ok(await AuditEvent.exists({ action: "workspace.member.remove", outcome: "success" }));
+});
+
+test("document search filters by name, workspace owner, category, and UTC upload date through the API", async () => {
+  const first = await adminAgent.post("/api/documents").field("category", "Finance")
+    .attach("file", png, { filename: "Quarterly report.png", contentType: "image/png" });
+  const second = await adminAgent.post("/api/documents").field("category", "Legal")
+    .attach("file", png, { filename: "Contract scan.png", contentType: "image/png" });
+  assert.equal(first.status, 201);
+  assert.equal(second.status, 201);
+  const legacy = await adminAgent.post("/api/documents").attach("file", png, { filename: "legacy.png", contentType: "image/png" });
+  assert.equal(legacy.status, 201);
+  await Document.collection.updateOne({ _id: new mongoose.Types.ObjectId(legacy.body.document.id) }, { $unset: { category: "" } });
+  await Document.collection.updateOne({ _id: new mongoose.Types.ObjectId(first.body.document.id) }, { $set: { createdAt: new Date("2025-01-10T14:00:00.000Z") } });
+  await Document.collection.updateOne({ _id: new mongoose.Types.ObjectId(second.body.document.id) }, { $set: { createdAt: new Date("2025-02-10T14:00:00.000Z") } });
+
+  const byName = await adminAgent.get("/api/documents?name=Quarterly");
+  assert.deepEqual(byName.body.documents.map((item) => item.id), [first.body.document.id]);
+  assert.equal((await adminAgent.get("/api/documents?name=.*")).body.documents.length, 0);
+  const byOwner = await adminAgent.get("/api/documents?owner=admin%40example.test");
+  assert.equal(byOwner.body.documents.length, 3);
+  const formerOwner = await inviteMember(adminAgent, "former-owner@example.test", "owner");
+  const formerOwnerUpload = await formerOwner.post("/api/documents").attach("file", png, { filename: "former-owner.png", contentType: "image/png" });
+  assert.equal(formerOwnerUpload.status, 201);
+  const formerOwnerUser = await User.findOne({ email: "former-owner@example.test" });
+  assert.equal((await adminAgent.delete(`/api/workspaces/current/members/${formerOwnerUser._id}`)).status, 204);
+  const byFormerOwner = await adminAgent.get("/api/documents?owner=former-owner%40example.test");
+  assert.deepEqual(byFormerOwner.body.documents.map((item) => item.id), [formerOwnerUpload.body.document.id]);
+  const byCategoryAndDate = await adminAgent.get("/api/documents?category=Finance&dateFrom=2025-01-10&dateTo=2025-01-10");
+  assert.deepEqual(byCategoryAndDate.body.documents.map((item) => item.id), [first.body.document.id]);
+  const oldDefaultCategory = await adminAgent.get("/api/documents?category=Other");
+  assert.deepEqual(
+    oldDefaultCategory.body.documents.map((item) => item.id).sort(),
+    [legacy.body.document.id, formerOwnerUpload.body.document.id].sort()
+  );
+  assert.equal((await adminAgent.get("/api/documents?dateFrom=2025-02-11&dateTo=2025-02-01")).status, 400);
+  assert.equal((await adminAgent.get("/api/documents?category=Payroll")).status, 400);
+
+  const joined = await inviteMember(adminAgent, "same-workspace-viewer@example.test", "viewer");
+  const privateUpload = await joined.post("/api/documents").attach("file", png, { filename: "viewer-private.png", contentType: "image/png" });
+  assert.equal(privateUpload.status, 403);
+  const visible = await joined.get("/api/documents?category=Finance");
+  assert.equal(visible.status, 200);
+  assert.equal(visible.body.documents.length, 0);
+  assert.equal((await viewerAgent.get(`/api/documents?name=${encodeURIComponent("Quarterly")}`)).body.documents.length, 0);
 });

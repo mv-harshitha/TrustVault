@@ -27,6 +27,16 @@ export const documentUpdateSchema = z.object({
   name: z.string().trim().min(1).max(255).refine((value) => !/[\\/\u0000-\u001f]/.test(value), "Document name contains invalid characters")
 }).strict();
 
+export const documentSearchSchema = z.object({
+  name: z.string().trim().max(120).optional(),
+  owner: z.string().trim().max(120).optional(),
+  category: z.enum(["Finance", "Legal", "HR", "Operations", "Other"]).optional(),
+  dateFrom: z.string().date().optional(),
+  dateTo: z.string().date().optional()
+}).strict().refine((filters) => !filters.dateFrom || !filters.dateTo || filters.dateFrom <= filters.dateTo, {
+  message: "dateFrom must not be after dateTo"
+});
+
 export const inviteSchema = z.object({
   email: z.string().trim().email().max(254),
   role: z.enum(["owner", "viewer"])
@@ -38,3 +48,5 @@ export const acceptInviteSchema = z.object({
   password: passwordSchema,
   invitationCode: z.string().min(32).max(128)
 });
+
+export const documentCategorySchema = z.enum(["Finance", "Legal", "HR", "Operations", "Other"]);

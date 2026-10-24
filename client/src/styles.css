@@ -130,6 +130,10 @@ tr:last-child td { border-bottom: 0; }
 .search-box { display: flex; gap: 8px; align-items: center; background: white; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; width: min(310px, 70%); color: #9aa6b3; }
 .search-box input { width: 100%; border: 0; outline: 0; height: 34px; color: var(--ink); font-size: 10px; background: transparent; }
 .result-count { color: #8794a3; font-size: 9px; }
+.document-filters { justify-content: flex-start; flex-wrap: wrap; gap: 8px; }
+.document-filters > label:not(.search-box) input, .document-filters select, .upload-category select { min-height: 36px; max-width: 190px; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink); padding: 0 9px; font: inherit; }
+.document-filters .search-box { width: min(220px, 100%); }
+.upload-category { display: grid; gap: 6px; max-width: 260px; margin: 14px 0; color: var(--ink); font-size: 10px; }
 .empty-state { min-height: 210px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; border: 1px dashed #dce3eb; border-radius: 8px; color: #7e8a99; text-align: center; }
 .empty-state strong { color: #435064; font-size: 12px; margin: 11px 0 5px; }
 .empty-state p { font-size: 10px; margin: 0; }
