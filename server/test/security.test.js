@@ -215,6 +215,33 @@ test("protects routes without a session and revokes a session at logout", async 
   assert.equal((await agent.get("/api/auth/me")).status, 401);
 });
 
+test("audits unauthenticated direct requests for an existing document without recording credentials", async () => {
+  const uploaded = await adminAgent.post("/api/documents")
+    .attach("file", png, { filename: "unauthenticated-audit.png", contentType: "image/png" });
+  assert.equal(uploaded.status, 201);
+  const id = uploaded.body.document.id;
+
+  const denied = await request(app)
+    .get(`/api/documents/${id}/download`)
+    .set("Authorization", "Bearer harmless-test-token");
+  assert.equal(denied.status, 401);
+
+  const event = await AuditEvent.findOne({
+    action: "document.access",
+    outcome: "denied",
+    document: id
+  }).lean();
+  assert.ok(event);
+  assert.equal(event.actor, null);
+  assert.equal(String(event.company), String((await Document.findById(id)).company));
+  assert.equal(event.metadata.reason, "missing_session");
+  assert.equal(event.metadata.requestedPath, `/api/documents/${id}/download`);
+  assert.equal(JSON.stringify(event).includes("harmless-test-token"), false);
+  const visibleToAdmin = await adminAgent.get("/api/audit-logs");
+  assert.equal(visibleToAdmin.status, 200);
+  assert.ok(visibleToAdmin.body.events.some((item) => String(item._id) === String(event._id)));
+});
+
 test("uploads verified files, checks MIME and size, and serves downloads after authorization", async () => {
   const uploaded = await adminAgent.post("/api/documents")
     .attach("file", png, { filename: "../../report.png", contentType: "image/png" });
