@@ -13,6 +13,8 @@ All routes use the `/api` prefix. The browser client sends the HttpOnly `trustva
 | POST | `/api/auth/logout` | Authenticated | Increments the server-side authentication version and clears the cookie. Returns 204. |
 | GET | `/api/auth/me` | Authenticated | Returns the current session user and workspace membership. |
 
+The API connects to MongoDB before it starts listening. A missing or invalid `MONGODB_URI`, database authentication failure, or Atlas network denial prevents startup, so `/api/health` will not be available. A successful health response confirms the HTTP process is running; it is not a per-request database check. The server uses the `trustvault` database explicitly.
+
 The registration form calls `POST /api/auth/register`. The client API base is `VITE_API_URL`, falling back to `http://localhost:4000/api`. Set the server `CLIENT_ORIGIN` to the exact frontend origin; local development defaults to `http://localhost:5173`. JSON POSTs require a CORS preflight, which Express handles before the trusted-origin middleware.
 
 If the browser reports `Failed to fetch`, inspect the browser Network panel and check that `GET http://localhost:4000/api/health` responds. A refused connection means the browser cannot reach the API process. A CORS failure means the response is blocked by the browser; check the request's `Origin`, `CLIENT_ORIGIN`, and OPTIONS response. Validation and application errors are HTTP responses with JSON bodies, rather than browser-level fetch failures.

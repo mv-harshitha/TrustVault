@@ -2,7 +2,7 @@
 
 TrustVault is a full-stack MVP for private company workspaces, explicitly shared documents, role-checked downloads, and backend-generated audit records. The app keeps file objects private and performs authorization on every document operation.
 
-**Status:** source is published in the GitHub repository; no live deployment or production credentials were provided. Do not use real confidential documents until you have configured and independently verified production services.
+**Status:** source is published in the GitHub repository; no live deployment or production credentials were provided in this workspace. The automated tests use an isolated MongoDB Memory Server, and a live MongoDB Atlas connection has not been verified with project credentials. Do not use real confidential documents until you have configured and independently verified Atlas, Supabase, and the deployment settings.
 
 ## Implemented
 
@@ -28,8 +28,23 @@ The membership model allows one company membership per user for this MVP. A user
 ## Requirements
 
 - Node.js 20 or newer and npm
-- MongoDB local instance or MongoDB Atlas cluster
+- MongoDB Atlas cluster (or a local MongoDB instance for offline development)
 - Supabase project and a private Storage bucket
+
+### MongoDB Atlas setup
+
+TrustVault uses Mongoose and accepts a standard Atlas `mongodb+srv://` connection string. To connect your cluster:
+
+1. In MongoDB Atlas, create a database user with read/write access to only the `trustvault` database. Do not use an Atlas administrative account for the application.
+2. Add only the network addresses you need to the cluster's IP access list. Use your current development address; avoid `0.0.0.0/0` unless your environment requires it.
+3. Use **Connect > Drivers** to copy the connection string, and include the database name `trustvault` before the query string:
+   `mongodb+srv://<username>:<password>@<cluster-host>/trustvault?retryWrites=true&w=majority`
+4. Put the real URI only in the ignored `server/.env` file as `MONGODB_URI`. Percent-encode special characters in the password. Never commit it, paste it into an issue, or send it in chat.
+5. Start the API. The server validates the URI, connects before listening, explicitly uses the `trustvault` database, and stops startup with a redacted error if the connection fails.
+
+If a database password or JWT secret has been exposed outside its secure environment, treat it as compromised. Rotate the Atlas user's password and generate a new `JWT_SECRET` locally; changing `JWT_SECRET` invalidates existing sessions and requires users to sign in again. This project does not rotate credentials automatically.
+
+The app does not migrate existing local data to Atlas. If you need that data, use `mongodump` and `mongorestore` or a reviewed migration process, and do not delete the local database until the Atlas copy has been verified.
 
 ## Local setup
 
@@ -40,7 +55,7 @@ The membership model allows one company membership per user for this MVP. A user
    ```
 
 2. Copy `server/.env.example` to `server/.env`. Set:
-   - `MONGODB_URI` to your development MongoDB URL.
+   - `MONGODB_URI` to your MongoDB Atlas URI (see [MongoDB Atlas setup](#mongodb-atlas-setup)) or a local MongoDB URI for offline development.
    - `JWT_SECRET` to a unique random secret (at least 32 random bytes).
    - `CLIENT_ORIGIN` to `http://localhost:5173`.
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET`.
@@ -74,7 +89,7 @@ npm test
 npm run build
 ```
 
-The server integration tests use `mongodb-memory-server`; its first run may need to download a MongoDB test binary. They use a fake storage adapter and test-only data. Tests do not connect to production services. The security suite checks password hashing, session authentication, CORS preflight, workspace isolation, direct API role restrictions, document grants, expiration, and denied access after revocation. It does not validate live Supabase or production deployment settings.
+The server integration tests use `mongodb-memory-server`; its first run may need to download a MongoDB test binary. They use a fake storage adapter and test-only data. Tests do not connect to production services or MongoDB Atlas. The security suite checks password hashing, session authentication, CORS preflight, workspace isolation, direct API role restrictions, document grants, expiration, and denied access after revocation. It does not validate live Supabase, Atlas credentials, Atlas network access, or production deployment settings.
 
 ## API
 
@@ -117,7 +132,7 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 ### Backend on Render
 
 1. Create a Render web service for the repository using `render.yaml` (or select `server/` as its root directory).
-2. Configure `MONGODB_URI` to an Atlas database and allow the Render service to reach it. Restrict Atlas network access as tightly as your hosting setup allows.
+2. Configure `MONGODB_URI` to an Atlas database as described in [MongoDB Atlas setup](#mongodb-atlas-setup) and allow the Render service to reach it. Restrict Atlas network access as tightly as your hosting setup allows.
 3. Create a **private** Supabase Storage bucket (public access disabled). Set backend-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET` in the server environment. The API checks bucket privacy before each file operation. Never put the service-role key in `client/.env` or a `VITE_` variable. The repository's `server/.env.example` contains placeholders; replace them only in an ignored local `server/.env` or hosting secret settings.
 4. Set `CLIENT_ORIGIN` to the exact deployed frontend origin, without a trailing slash.
 5. Set the frontend `VITE_API_URL` to `https://<your-render-service>/api` and the backend `CLIENT_ORIGIN` to the exact frontend origin. Verify `GET https://<your-render-service>/api/health` and the CORS preflight from the deployed frontend origin. Health alone does not verify registration, storage, or document authorization; run the documented smoke checks with test accounts before using real documents.
@@ -135,6 +150,7 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 ## Known limitations and honest submission notes
 
 - No live deployment has been created. The source repository is [github.com/mv-harshitha/TrustVault](https://github.com/mv-harshitha/TrustVault).
+- MongoDB Atlas connectivity has not been verified in this workspace. The local test suite uses MongoDB Memory Server and does not prove Atlas credentials, network access, or cluster permissions. Any credential previously exposed outside this repository should be treated as compromised and rotated before use with real data.
 - There is no email delivery service; admins must send one-time invitation codes to the matching email out-of-band.
 - User accounts are limited to one workspace in the current interface and API.
 - Only PDF, PNG, and JPEG are accepted. Signature validation is not malware scanning.

@@ -2,7 +2,7 @@
 
 ## Scope and assets
 
-This model covers the local MVP: the React/Vite client, Express API, MongoDB records, session cookies, permission records, audit events, and private Supabase Storage objects. It describes implemented server-side controls and their limits; it is not a production security certification.
+This model covers the application: the React/Vite client, Express API, MongoDB records stored locally or in MongoDB Atlas, session cookies, permission records, audit events, and private Supabase Storage objects. It describes implemented server-side controls and their limits; it is not a production security certification.
 
 Assets include account credentials, workspace membership, document metadata and bytes, permission grants, invitation codes, and audit history. Threat actors include unauthenticated callers, authenticated members of another workspace, viewers without a document grant, and members attempting operations outside their role.
 
@@ -18,10 +18,12 @@ Assets include account credentials, workspace membership, document metadata and 
 - Before upload, download, or delete, the server checks that its configured Supabase bucket exists and is private (`public: false`). Objects are never exposed with public or signed URLs; downloads are mediated by an authenticated API request with fresh authorization.
 - Server handlers write audit events for document upload/view/download/edit/delete, permission grant/revoke, and denied access/permission attempts. Audit APIs are read-only; workspace-wide activity is admin-only and document activity is owner/admin-only.
 - Security integration tests use direct HTTP requests through Supertest and MongoDB Memory Server. Storage is a fake adapter in these tests.
+- Database credentials come only from ignored `server/.env` or hosting secret settings. The connection helper accepts only `mongodb://` or `mongodb+srv://`, explicitly selects the `trustvault` database, uses a 15-second server-selection timeout, reuses an in-flight connection, and redacts MongoDB URIs from startup errors.
+- Atlas access control remains an operator responsibility: use a least-privilege database user, a narrow IP access list, and TLS (provided by Atlas SRV connections). The automated tests do not verify these settings.
 
 ## Verified behavior and evidence
 
-Run `npm test` for executable evidence of registration, bcrypt hashing and login, session revocation, CORS preflight, cross-workspace isolation, role restrictions, ignored client-supplied identity/role fields, denied direct view/download/delete/update requests, permission levels, expiration, revocation on subsequent reads, private-bucket enforcement with a fake storage adapter, audit event creation, and read-only audit APIs. Run `npm run build` for the client production build. These checks do not validate a deployed service or live Supabase configuration.
+Run `npm test` for executable evidence of registration, bcrypt hashing and login, session revocation, CORS preflight, cross-workspace isolation, role restrictions, ignored client-supplied identity/role fields, denied direct view/download/delete/update requests, permission levels, expiration, revocation on subsequent reads, private-bucket enforcement with a fake storage adapter, audit event creation, and read-only audit APIs. Run `npm run build` for the client production build. These checks do not validate a deployed service, live Supabase configuration, or a live MongoDB Atlas connection.
 
 | Threat | Impact | Mitigation | Related automated test | Accepted residual risk |
 | --- | --- | --- | --- | --- |
@@ -34,6 +36,8 @@ Run `npm test` for executable evidence of registration, bcrypt hashing and login
 
 ## Known risks and limits
 
+- No live MongoDB Atlas connection was verified during this change because no Atlas URI was available in the workspace. Tests use an isolated in-memory MongoDB. The operator must verify the Atlas URI, database user permissions, and IP access list.
+- Any database password or JWT secret previously exposed outside its secure environment must be considered compromised. Rotate the Atlas password and JWT secret; changing `JWT_SECRET` invalidates all existing sessions. These rotations are not automated.
 - Production MongoDB, Supabase, CORS, TLS, proxy, and cookie settings must be configured and verified by the operator. Create a private Supabase Storage bucket, then set backend-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET`; the server rejects buckets that Supabase reports as public. The service-role key bypasses Supabase Storage RLS and belongs only in the backend environment; never commit it or send it to the client.
 - Integration tests replace Supabase with a fake adapter; they prove the application refuses a bucket reported as public, but they do not prove cloud IAM policy or live storage behavior. No live Supabase bucket was verified during this phase.
 - File signature validation is not malware scanning. Only PDF, PNG, and JPEG are accepted.
