@@ -23,6 +23,10 @@ export const permissionSchema = z.object({
   expiresAt: z.string().datetime().optional().nullable()
 });
 
+export const documentUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(255).refine((value) => !/[\\/\u0000-\u001f]/.test(value), "Document name contains invalid characters")
+}).strict();
+
 export const inviteSchema = z.object({
   email: z.string().trim().email().max(254),
   role: z.enum(["owner", "viewer"])

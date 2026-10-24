@@ -10,8 +10,9 @@ TrustVault is a full-stack MVP for private company workspaces, explicitly shared
 - Registration creates a new company and its first admin. Admins can invite owners and viewers using a single-use, 48-hour invitation code.
 - Password hashing with bcrypt, an eight-hour JWT in an HttpOnly cookie, logout invalidation, trusted-origin checks, and rate limits on login, registration, invitation, upload, and member-invitation routes.
 - Private Supabase Storage uploads with server-generated object names. The server checks file signatures and accepts PDF, PNG, and JPEG up to 10 MB.
+- The API checks that the configured Supabase bucket exists and is private before file operations; downloads remain server-mediated and are authorized on each request.
 - Company-scoped document metadata, explicit view/download grants, expiration, revocation, owner/admin management, and authorization on each request.
-- Downloads stream through the authenticated backend rather than returning a storage URL, so a revoked grant is checked on the next download request.
+- Downloads are served through the authenticated backend rather than returning a storage URL, so a revoked grant is checked on the next download request.
 - Persistent MongoDB audit events for registration, login, upload, view, download, permission grants/revocations, deletion, invitations, denied document access, expired grants, and oversized uploads. Audit writes are awaited before success responses.
 - Responsive React workspace UI with login/registration, dashboard, document lists, upload, document permissions, member invitations, and admin audit visibility.
 - Automated integration tests for core authentication, tenancy, document access, permissions, audit visibility, file validation, and upload/download flows.
@@ -95,6 +96,7 @@ All endpoints are prefixed with `/api`. Authentication uses an HttpOnly cookie; 
 | GET | `/documents` | Authenticated; only accessible documents |
 | GET | `/documents/:id` | Owner, admin, or viewer with an active grant |
 | GET | `/documents/:id/download` | Owner/admin or user with an active download grant |
+| PATCH | `/documents/:id` | Owner/admin; `{ "name": "new-name.pdf" }` |
 | DELETE | `/documents/:id` | Owner or admin |
 | POST | `/documents/:id/permissions` | Owner or admin; `{ "email", "level", "expiresAt?" }` |
 | GET | `/documents/:id/permissions` | Owner or admin |
@@ -106,7 +108,7 @@ Permission `level` is `view` or `download`. Expiration is an ISO-8601 timestamp.
 
 ## Audit and reliability notes
 
-Audit events are generated in server handlers, never accepted from client activity claims, and there are no ordinary API endpoints for editing or deleting them. Passwords, JWTs, storage keys, and document contents are excluded. Each event includes MongoDB's event ID, UTC creation timestamp, actor/workspace/document where known, action, outcome, safe metadata, and request correlation ID.
+Audit events are generated in server handlers, never accepted from client activity claims, and there are no API endpoints for creating, editing, or deleting them. Passwords, JWTs, storage keys, and document contents are excluded. Each event includes MongoDB's event ID, UTC creation timestamp, actor/workspace/document where known, action, outcome, safe HTTP method/route metadata, and request correlation ID. This is application-level append-only behavior, not tamper-proof storage: a database administrator or compromised server credential can alter records.
 
 Audit writes are awaited and failures are returned as errors rather than silently treated as success. MongoDB and object storage do not share a transaction: a process crash or service failure between a storage change, metadata update, and audit insert can still leave a partial operation or an incomplete trail. Downloads are audited when the backend successfully reads and serves the file; a client disconnect after that point cannot be distinguished from a completed download. Configure MongoDB backups and monitoring for stronger operational durability.
 
@@ -116,7 +118,7 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 
 1. Create a Render web service for the repository using `render.yaml` (or select `server/` as its root directory).
 2. Configure `MONGODB_URI` to an Atlas database and allow the Render service to reach it. Restrict Atlas network access as tightly as your hosting setup allows.
-3. Create a private Supabase bucket and set `SUPABASE_URL`, the server-only service-role key, and `SUPABASE_BUCKET`.
+3. Create a **private** Supabase Storage bucket (public access disabled). Set backend-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET` in the server environment. The API checks bucket privacy before each file operation. Never put the service-role key in `client/.env` or a `VITE_` variable. The repository's `server/.env.example` contains placeholders; replace them only in an ignored local `server/.env` or hosting secret settings.
 4. Set `CLIENT_ORIGIN` to the exact deployed frontend origin, without a trailing slash.
 5. Set the frontend `VITE_API_URL` to `https://<your-render-service>/api` and the backend `CLIENT_ORIGIN` to the exact frontend origin. Verify `GET https://<your-render-service>/api/health` and the CORS preflight from the deployed frontend origin. Health alone does not verify registration, storage, or document authorization; run the documented smoke checks with test accounts before using real documents.
 

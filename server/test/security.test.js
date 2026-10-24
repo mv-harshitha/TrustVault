@@ -18,6 +18,7 @@ let adminAgent;
 let viewerAgent;
 let documentId;
 let nextTestClientAddress = 1;
+let storageIsPrivate = true;
 
 const png = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -34,6 +35,7 @@ const png = Buffer.from([
 function fakeStorage() {
   return {
     storage: {
+      getBucket: async () => ({ data: { id: "trustvault-private", public: !storageIsPrivate }, error: null }),
       from: () => ({
         upload: async () => ({ error: null }),
         remove: async () => ({ error: null }),
@@ -75,6 +77,7 @@ async function inviteMember(admin, email, role) {
 before(async () => {
   process.env.JWT_SECRET = "test-only-secret-with-sufficient-length";
   process.env.CLIENT_ORIGIN = "http://localhost:5173";
+  process.env.SUPABASE_BUCKET = "trustvault-private";
   mongo = await MongoMemoryServer.create();
   await mongoose.connect(mongo.getUri());
   const [{ default: serverApp }, userModel, companyModel, membershipModel, documentModel, permissionModel, auditModel] = await Promise.all([
@@ -98,6 +101,7 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  storageIsPrivate = true;
   await Promise.all([
     User.deleteMany({}),
     Company.deleteMany({}),
@@ -195,9 +199,12 @@ test("protects routes without a session and revokes a session at logout", async 
 
 test("uploads verified files, checks MIME and size, and serves downloads after authorization", async () => {
   const uploaded = await adminAgent.post("/api/documents")
-    .attach("file", png, { filename: "report.png", contentType: "image/png" });
+    .attach("file", png, { filename: "../../report.png", contentType: "image/png" });
   assert.equal(uploaded.status, 201);
   documentId = uploaded.body.document.id;
+  const safeDocument = await Document.findById(documentId);
+  assert.equal(/[\\/\u0000-\u001f\u007f]/.test(safeDocument.name), false);
+  assert.equal(safeDocument.name.startsWith("."), false);
   const forbiddenType = await adminAgent.post("/api/documents")
     .attach("file", Buffer.from("not a pdf"), { filename: "report.pdf", contentType: "application/pdf" });
   assert.equal(forbiddenType.status, 400);
@@ -207,8 +214,22 @@ test("uploads verified files, checks MIME and size, and serves downloads after a
   const downloaded = await adminAgent.get(`/api/documents/${documentId}/download`);
   assert.equal(downloaded.status, 200);
   assert.match(downloaded.headers["content-disposition"], /report.png/);
-  assert.ok(await AuditEvent.exists({ action: "document.upload", outcome: "success" }));
-  assert.ok(await AuditEvent.exists({ action: "document.download", outcome: "success" }));
+  const uploadEvent = await AuditEvent.findOne({ action: "document.upload", outcome: "success", document: documentId }).lean();
+  const downloadEvent = await AuditEvent.findOne({ action: "document.download", outcome: "success", document: documentId }).lean();
+  assert.ok(uploadEvent?.createdAt instanceof Date);
+  assert.ok(downloadEvent?.createdAt instanceof Date);
+  assert.ok(uploadEvent.requestId);
+  assert.equal(downloadEvent.metadata.method, "GET");
+  assert.equal(downloadEvent.metadata.route, "/api/documents/:id/download");
+});
+
+test("refuses document storage when the configured bucket is public", async () => {
+  storageIsPrivate = false;
+  const response = await adminAgent.post("/api/documents")
+    .attach("file", png, { filename: "private.png", contentType: "image/png" });
+  assert.equal(response.status, 502);
+  assert.equal(await Document.countDocuments({}), 0);
+  assert.ok(await AuditEvent.exists({ action: "document.upload", outcome: "failure", "metadata.reason": "storage_failure" }));
 });
 
 test("enforces workspace isolation, grant eligibility, permission level, expiry, and revocation", async () => {
@@ -255,7 +276,9 @@ test("enforces workspace isolation, grant eligibility, permission level, expiry,
     .send({ email: "member@example.test", level: "download" });
   assert.equal(downloadGrant.status, 201);
   assert.equal((await member.get(`/api/documents/${documentId}/download`)).status, 200);
+  assert.ok(await AuditEvent.exists({ action: "permission.grant", outcome: "success", document: documentId }));
   assert.equal((await adminAgent.delete(`/api/documents/${documentId}/permissions/${downloadGrant.body.permission.id}`)).status, 204);
+  assert.ok(await AuditEvent.exists({ action: "permission.revoke", outcome: "success", document: documentId }));
   assert.equal((await member.get(`/api/documents/${documentId}`)).status, 403);
   assert.equal((await member.get(`/api/documents/${documentId}/view`)).status, 403);
   assert.equal((await member.get(`/api/documents/${documentId}/download`)).status, 403);
@@ -304,7 +327,8 @@ test("owner, administrator, and viewer roles are enforced on direct document API
   assert.equal((await viewer.post(`/api/documents/${ownerDocumentId}/permissions`)
     .send({ email: "outsider@example.test", level: "download", role: "admin", userId: adminUser._id })).status, 403);
   assert.equal((await viewer.delete(`/api/documents/${ownerDocumentId}`)).status, 403);
-  assert.equal((await viewer.patch(`/api/documents/${ownerDocumentId}`).send({ name: "renamed.png" })).status, 404);
+  assert.equal((await viewer.patch(`/api/documents/${ownerDocumentId}`).send({ name: "renamed.png" })).status, 403);
+  assert.ok(await AuditEvent.exists({ action: "document.edit", outcome: "denied" }));
 
   const ownerGrant = await owner.post(`/api/documents/${ownerDocumentId}/permissions`)
     .send({ email: "viewer@example.test", level: "view" });
@@ -313,6 +337,7 @@ test("owner, administrator, and viewer roles are enforced on direct document API
   assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}/view`)).status, 200);
   assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}/download`)).status, 403);
   assert.equal((await viewer.delete(`/api/documents/${ownerDocumentId}/permissions/${ownerGrant.body.permission.id}`)).status, 403);
+  assert.ok(await AuditEvent.exists({ action: "permission.revoke", outcome: "denied" }));
 
   assert.equal((await owner.delete(`/api/documents/${ownerDocumentId}/permissions/${ownerGrant.body.permission.id}`)).status, 204);
   assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}/view`)).status, 403);
@@ -344,6 +369,48 @@ test("records successful and denied access events and limits audit visibility", 
   assert.equal(adminLogs.status, 200);
   assert.equal(otherLogs.status, 403);
   assert.ok(adminLogs.body.events.some((event) => event.action === "document.view" && event.outcome === "denied"));
+});
+
+test("audits document edits with safe request context and exposes no audit mutation API", async () => {
+  const uploaded = await adminAgent.post("/api/documents")
+    .attach("file", png, { filename: "before.png", contentType: "image/png" });
+  assert.equal(uploaded.status, 201);
+  const id = uploaded.body.document.id;
+  const viewer = await inviteMember(adminAgent, "edit-viewer@example.test", "viewer");
+  const denied = await viewer.patch(`/api/documents/${id}`).send({ name: "not-allowed.png" });
+  assert.equal(denied.status, 403);
+  const edited = await adminAgent.patch(`/api/documents/${id}`).send({ name: "after.png" });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.document.name, "after.png");
+  assert.equal((await adminAgent.patch(`/api/documents/${id}`).send({ name: "../unsafe.png" })).status, 400);
+
+  const editEvent = await AuditEvent.findOne({ action: "document.edit", outcome: "success", document: id }).lean();
+  assert.ok(editEvent);
+  assert.ok(editEvent.createdAt instanceof Date);
+  assert.equal(String(editEvent.actor), String((await User.findOne({ email: "admin@example.test" }))._id));
+  assert.equal(editEvent.metadata.method, "PATCH");
+  assert.equal(editEvent.metadata.route, "/api/documents/:id");
+  assert.deepEqual(editEvent.metadata.fields, ["name"]);
+  assert.equal(JSON.stringify(editEvent).includes("Strong-password-123"), false);
+  assert.ok(await AuditEvent.exists({ action: "document.edit", outcome: "denied", actor: (await User.findOne({ email: "edit-viewer@example.test" }))._id }));
+
+  const countBefore = await AuditEvent.countDocuments();
+  assert.equal((await adminAgent.post("/api/audit-logs").send({ action: "forged" })).status, 404);
+  assert.equal((await adminAgent.patch(`/api/audit-logs/${editEvent._id}`).send({ outcome: "success" })).status, 404);
+  assert.equal((await adminAgent.delete(`/api/audit-logs/${editEvent._id}`)).status, 404);
+  assert.equal((await viewer.get("/api/audit-logs")).status, 403);
+  assert.equal(await AuditEvent.countDocuments(), countBefore);
+});
+
+test("records document deletion only after the authorized deletion succeeds", async () => {
+  const uploaded = await adminAgent.post("/api/documents")
+    .attach("file", png, { filename: "delete.png", contentType: "image/png" });
+  assert.equal(uploaded.status, 201);
+  const id = uploaded.body.document.id;
+  const deleted = await adminAgent.delete(`/api/documents/${id}`);
+  assert.equal(deleted.status, 204);
+  assert.equal(await Document.exists({ _id: id }), null);
+  assert.ok(await AuditEvent.exists({ action: "document.delete", outcome: "success", document: id, actor: (await User.findOne({ email: "admin@example.test" }))._id }));
 });
 
 test("workspace admins can remove only their own members and revoke their grants", async () => {

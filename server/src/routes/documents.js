@@ -7,12 +7,12 @@ import Document from "../models/Document.js";
 import Permission from "../models/Permission.js";
 import Membership from "../models/Membership.js";
 import User from "../models/User.js";
-import { getBucket, getStorage } from "../config/storage.js";
+import { getPrivateBucketStorage } from "../config/storage.js";
 import { asyncHandler, httpError } from "../middleware/errors.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getDocumentAccess } from "../services/documents.js";
 import { recordAudit } from "../services/audit.js";
-import { permissionSchema } from "../validators/index.js";
+import { documentUpdateSchema, permissionSchema } from "../validators/index.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
@@ -42,9 +42,12 @@ router.post("/", uploadLimiter, asyncHandler(async (req, _res, next) => {
   }
   const storagePath = `${req.membership.company._id}/${randomUUID()}`;
   let storage;
+  let storageBucket;
   try {
-    storage = getStorage();
-    const { error } = await storage.storage.from(getBucket()).upload(storagePath, req.file.buffer, {
+    const privateStorage = await getPrivateBucketStorage();
+    storage = privateStorage.storage;
+    storageBucket = privateStorage.bucket;
+    const { error } = await storage.storage.from(storageBucket).upload(storagePath, req.file.buffer, {
       contentType: detected.mime,
       upsert: false
     });
@@ -55,10 +58,15 @@ router.post("/", uploadLimiter, asyncHandler(async (req, _res, next) => {
   }
   let document;
   try {
+    const safeName = req.file.originalname
+      .replace(/[\\/\u0000-\u001f\u007f]/g, "")
+      .replace(/^\.+/, "")
+      .trim()
+      .slice(0, 255) || "document";
     document = await Document.create({
       company: req.membership.company._id,
       owner: req.user._id,
-      name: req.file.originalname.replace(/[\\/\u0000-\u001f]/g, "").slice(0, 255) || "document",
+      name: safeName,
       storagePath,
       mimeType: detected.mime,
       size: req.file.size
@@ -66,7 +74,7 @@ router.post("/", uploadLimiter, asyncHandler(async (req, _res, next) => {
     await recordAudit(req, { action: "document.upload", outcome: "success", document: document._id });
   } catch (error) {
     if (document) await Document.deleteOne({ _id: document._id });
-    const { error: cleanupError } = await storage.storage.from(getBucket()).remove([storagePath]);
+    const { error: cleanupError } = await storage.storage.from(storageBucket).remove([storagePath]);
     if (cleanupError) console.error(`[${req.id}] Failed to remove incomplete upload:`, cleanupError);
     throw error;
   }
@@ -121,7 +129,8 @@ router.get("/:id", asyncHandler(async (req, res) => {
 async function serveDocumentFile(req, res, document, disposition) {
   let contents;
   try {
-    const { data, error } = await getStorage().storage.from(getBucket()).download(document.storagePath);
+    const { storage, bucket } = await getPrivateBucketStorage();
+    const { data, error } = await storage.storage.from(bucket).download(document.storagePath);
     if (error || !data) throw new Error("Storage download failed");
     contents = Buffer.from(await data.arrayBuffer());
   } catch {
@@ -166,29 +175,41 @@ router.get("/:id/download", asyncHandler(async (req, res) => {
 
 router.delete("/:id", asyncHandler(async (req, res) => {
   const document = await Document.findOne({ _id: req.params.id, company: req.membership.company._id }).select("+storagePath");
-  if (!document) throw httpError(404, "Document not found");
+  if (!document) {
+    await recordAudit(req, { action: "document.delete", outcome: "denied", metadata: { documentId: req.params.id, reason: "document_not_found" } });
+    throw httpError(404, "Document not found");
+  }
   if (req.membership.role !== "admin" && String(document.owner) !== String(req.user._id)) {
     await recordAudit(req, { action: "document.delete", outcome: "denied", document: document._id });
     throw httpError(403, "Only the owner or an administrator can delete this document");
   }
   try {
-    const { error } = await getStorage().storage.from(getBucket()).remove([document.storagePath]);
+    const { storage, bucket } = await getPrivateBucketStorage();
+    const { error } = await storage.storage.from(bucket).remove([document.storagePath]);
     if (error) throw error;
   } catch {
     await recordAudit(req, { action: "document.delete", outcome: "failure", document: document._id, metadata: { reason: "storage_failure" } });
     throw httpError(502, "Document storage is unavailable");
   }
-  await Promise.all([
-    Permission.deleteMany({ document: document._id }),
-    Document.deleteOne({ _id: document._id })
-  ]);
+  try {
+    await Promise.all([
+      Permission.deleteMany({ document: document._id }),
+      Document.deleteOne({ _id: document._id })
+    ]);
+  } catch {
+    await recordAudit(req, { action: "document.delete", outcome: "failure", document: document._id, metadata: { reason: "metadata_delete_failure", storageObjectRemoved: true } });
+    throw httpError(500, "Document metadata could not be deleted after storage removal");
+  }
   await recordAudit(req, { action: "document.delete", outcome: "success", document: document._id });
   res.status(204).end();
 }));
 
 router.post("/:id/permissions", asyncHandler(async (req, res) => {
   const { document } = await getDocumentAccess(req.params.id, req.membership, req.user._id);
-  if (!document) throw httpError(404, "Document not found");
+  if (!document) {
+    await recordAudit(req, { action: "permission.grant", outcome: "denied", metadata: { documentId: req.params.id, reason: "document_not_found" } });
+    throw httpError(404, "Document not found");
+  }
   if (req.membership.role !== "admin" && String(document.owner._id) !== String(req.user._id)) {
     await recordAudit(req, { action: "permission.grant", outcome: "denied", document: document._id });
     throw httpError(403, "Only the owner or an administrator can grant access");
@@ -219,8 +240,14 @@ router.post("/:id/permissions", asyncHandler(async (req, res) => {
 
 router.get("/:id/permissions", asyncHandler(async (req, res) => {
   const { document } = await getDocumentAccess(req.params.id, req.membership, req.user._id);
-  if (!document) throw httpError(404, "Document not found");
-  if (req.membership.role !== "admin" && String(document.owner._id) !== String(req.user._id)) throw httpError(403, "Only the owner or an administrator can manage permissions");
+  if (!document) {
+    await recordAudit(req, { action: "permission.view", outcome: "denied", metadata: { documentId: req.params.id, reason: "document_not_found" } });
+    throw httpError(404, "Document not found");
+  }
+  if (req.membership.role !== "admin" && String(document.owner._id) !== String(req.user._id)) {
+    await recordAudit(req, { action: "permission.view", outcome: "denied", document: document._id, metadata: { reason: "role_not_allowed" } });
+    throw httpError(403, "Only the owner or an administrator can manage permissions");
+  }
   const permissions = await Permission.find({
     document: document._id,
     revokedAt: null,
@@ -232,14 +259,23 @@ router.get("/:id/permissions", asyncHandler(async (req, res) => {
 
 router.delete("/:id/permissions/:permissionId", asyncHandler(async (req, res) => {
   const { document } = await getDocumentAccess(req.params.id, req.membership, req.user._id);
-  if (!document) throw httpError(404, "Document not found");
-  if (req.membership.role !== "admin" && String(document.owner._id) !== String(req.user._id)) throw httpError(403, "Only the owner or an administrator can revoke access");
+  if (!document) {
+    await recordAudit(req, { action: "permission.revoke", outcome: "denied", metadata: { documentId: req.params.id, reason: "document_not_found" } });
+    throw httpError(404, "Document not found");
+  }
+  if (req.membership.role !== "admin" && String(document.owner._id) !== String(req.user._id)) {
+    await recordAudit(req, { action: "permission.revoke", outcome: "denied", document: document._id, metadata: { reason: "role_not_allowed" } });
+    throw httpError(403, "Only the owner or an administrator can revoke access");
+  }
   const permission = await Permission.findOneAndUpdate(
     { _id: req.params.permissionId, document: document._id, revokedAt: null },
     { $set: { revokedAt: new Date() } },
     { new: true }
   );
-  if (!permission) throw httpError(404, "Active permission not found");
+  if (!permission) {
+    await recordAudit(req, { action: "permission.revoke", outcome: "denied", document: document._id, metadata: { permissionId: req.params.permissionId, reason: "permission_not_found" } });
+    throw httpError(404, "Active permission not found");
+  }
   await recordAudit(req, {
     action: "permission.revoke",
     outcome: "success",
@@ -247,6 +283,35 @@ router.delete("/:id/permissions/:permissionId", asyncHandler(async (req, res) =>
     metadata: { level: permission.level, targetUserId: permission.user }
   });
   res.status(204).end();
+}));
+
+router.patch("/:id", asyncHandler(async (req, res) => {
+  const document = await Document.findOne({ _id: req.params.id, company: req.membership.company._id });
+  if (!document) {
+    await recordAudit(req, { action: "document.edit", outcome: "denied", metadata: { documentId: req.params.id, reason: "document_not_found" } });
+    throw httpError(404, "Document not found");
+  }
+  if (req.membership.role !== "admin" && String(document.owner) !== String(req.user._id)) {
+    await recordAudit(req, { action: "document.edit", outcome: "denied", document: document._id, metadata: { reason: "role_not_allowed" } });
+    throw httpError(403, "Only the owner or an administrator can edit this document");
+  }
+  const { name } = documentUpdateSchema.parse(req.body);
+  const previousName = document.name;
+  document.name = name;
+  await document.save();
+  try {
+    await recordAudit(req, {
+      action: "document.edit",
+      outcome: "success",
+      document: document._id,
+      metadata: { fields: ["name"] }
+    });
+  } catch (error) {
+    document.name = previousName;
+    await document.save();
+    throw error;
+  }
+  res.json({ document: { id: document._id, name: document.name, size: document.size, mimeType: document.mimeType, createdAt: document.createdAt } });
 }));
 
 export default router;

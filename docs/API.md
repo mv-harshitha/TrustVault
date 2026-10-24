@@ -35,12 +35,17 @@ If the browser reports `Failed to fetch`, inspect the browser Network panel and 
 | GET | `/api/documents/:id` | Administrator, document owner, or member with an active view/download grant |
 | GET | `/api/documents/:id/view` | Administrator, document owner, or member with an active view/download grant |
 | GET | `/api/documents/:id/download` | Administrator, document owner, or member with an active download grant |
+| PATCH | `/api/documents/:id` | Administrator or document owner; `{ "name": "new-name.pdf" }` |
 | DELETE | `/api/documents/:id` | Administrator or document owner |
 | POST | `/api/documents/:id/permissions` | Administrator or document owner; body uses `email`, `level` (`view` or `download`), and optional ISO-8601 `expiresAt` |
 | GET | `/api/documents/:id/permissions` | Administrator or document owner |
 | DELETE | `/api/documents/:id/permissions/:permissionId` | Administrator or document owner |
 
-There is no document metadata edit endpoint. Every document lookup is scoped to the authenticated member's company. A non-admin member's access is evaluated against the current document owner and current grant on each request. Expired and revoked grants do not authorize access; a revoked view or download is rejected on the next API request. Cross-company document identifiers return 404. Same-company members without access receive 403.
+Every document lookup is scoped to the authenticated member's company. A non-admin member's access is evaluated against the current document owner and current grant on each request. Expired and revoked grants do not authorize access; a revoked view or download is rejected on the next API request. Cross-company document identifiers return 404. Same-company members without access receive 403.
+
+Uploads require an explicitly configured `SUPABASE_BUCKET`. Before each upload, download, or delete, the server checks Supabase Storage metadata and refuses to operate unless the bucket exists and reports `public: false`. Objects use server-generated workspace/UUID paths. The browser receives neither the service-role key nor a permanent or signed storage URL; file reads are served through authenticated Express routes after current access checks. Create a private bucket in Supabase Storage, then set backend-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET`. Do not set these in the client environment.
+
+`PATCH /api/documents/:id` edits only the document display name. It is restricted to the document owner or workspace administrator and validates the name on the server. Upload, view, download, edit, delete, grant, revoke, and denied document/permission operations create server-side audit events. Events include actor, action, outcome, timestamp, document where known, request ID, and safe HTTP method/route metadata. There is no API for clients to create, edit, or delete audit events. The workspace audit listing is administrator-only; document audit history is limited to that document's owner and administrators.
 
 The workspace role `owner` permits uploading, but it does not grant access to every document in that workspace. Document ownership is recorded from the authenticated user at upload time. Workspace administrators can access all documents in their company.
 
