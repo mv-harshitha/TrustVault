@@ -1,0 +1,146 @@
+# TrustVault — Secure Document Sharing with a Real Audit Trail
+
+TrustVault is a full-stack MVP for private company workspaces, explicitly shared documents, role-checked downloads, and backend-generated audit records. The app keeps file objects private and performs authorization on every document operation.
+
+**Status:** implemented locally, not yet deployed. No production accounts, credentials, public repository, or live website were provided. Do not use real confidential documents until you have configured and independently verified production services.
+
+## Implemented
+
+- Company workspaces with `admin`, `owner`, and `viewer` memberships. Admins can invite and remove members in their own workspace.
+- Registration creates a new company and its first admin. Admins can invite owners and viewers using a single-use, 48-hour invitation code.
+- Password hashing with bcrypt, an eight-hour JWT in an HttpOnly cookie, logout invalidation, trusted-origin checks, and rate limits on login, registration, invitation, upload, and member-invitation routes.
+- Private Supabase Storage uploads with server-generated object names. The server checks file signatures and accepts PDF, PNG, and JPEG up to 10 MB.
+- Company-scoped document metadata, explicit view/download grants, expiration, revocation, owner/admin management, and authorization on each request.
+- Downloads stream through the authenticated backend rather than returning a storage URL, so a revoked grant is checked on the next download request.
+- Persistent MongoDB audit events for registration, login, upload, view, download, permission grants/revocations, deletion, invitations, denied document access, expired grants, and oversized uploads. Audit writes are awaited before success responses.
+- Responsive React workspace UI with login/registration, dashboard, document lists, upload, document permissions, member invitations, and admin audit visibility.
+- Automated integration tests for core authentication, tenancy, document access, permissions, audit visibility, file validation, and upload/download flows.
+
+## Architecture
+
+`client/` is a React/Vite single-page application. `server/` is an Express API. MongoDB stores users, companies, memberships, document metadata, permissions, invitations, and audit events. Supabase Storage contains private file objects only.
+
+Authorization is implemented in the API and uses the authenticated user plus the user's database membership. Client-supplied role, company, and owner IDs are not accepted as authorization inputs. Every document lookup is scoped to the authenticated company.
+
+The membership model allows one company membership per user for this MVP. A user account cannot yet switch between multiple workspaces. Audit list endpoints are capped at the latest 100 entries; document lists are capped at 200.
+
+## Requirements
+
+- Node.js 20 or newer and npm
+- MongoDB local instance or MongoDB Atlas cluster
+- Supabase project and a private Storage bucket
+
+## Local setup
+
+1. From the repository root, install workspace dependencies:
+
+   ```powershell
+   npm install
+   ```
+
+2. Copy `server/.env.example` to `server/.env`. Set:
+   - `MONGODB_URI` to your development MongoDB URL.
+   - `JWT_SECRET` to a unique random secret (at least 32 random bytes).
+   - `CLIENT_ORIGIN` to `http://localhost:5173`.
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET`.
+
+   Keep the Supabase service-role key only in the server environment. Create the bucket named by `SUPABASE_BUCKET` as **private** in Supabase. Never put the service-role key in client environment variables.
+
+3. Copy `client/.env.example` to `client/.env`. For local use, keep:
+
+   ```env
+   VITE_API_URL=http://localhost:4000/api
+   ```
+
+4. Start the API and UI from the repository root:
+
+   ```powershell
+   npm run dev
+   ```
+
+   The API listens on port 4000; Vite serves the UI at http://localhost:5173. `npm run dev` needs both ports available.
+
+## Tests and build
+
+Install dependencies first, then run:
+
+```powershell
+npm test
+npm run build
+```
+
+The server integration tests use `mongodb-memory-server`; its first run may need to download a MongoDB test binary. They use a fake storage adapter and test-only data. Tests do not connect to production services.
+
+## API
+
+All endpoints are prefixed with `/api`. Authentication uses an HttpOnly cookie; the browser client sends it with credentials.
+
+| Method | Endpoint | Access |
+| --- | --- | --- |
+| GET | `/health` | Public health check |
+| POST | `/auth/register` | Public; creates a workspace admin |
+| POST | `/auth/accept-invite` | Public; consumes a matching invitation code |
+| POST | `/auth/login` | Public, rate-limited |
+| POST | `/auth/logout` | Authenticated |
+| GET | `/auth/me` | Authenticated |
+| GET | `/workspaces/current` | Authenticated |
+| GET | `/workspaces/current/members` | Admin |
+| DELETE | `/workspaces/current/members/:userId` | Admin; revokes the member's active grants |
+| POST | `/workspaces/current/invitations` | Admin |
+| POST | `/documents` | Owner or admin; multipart field `file` |
+| GET | `/documents` | Authenticated; only accessible documents |
+| GET | `/documents/:id` | Owner, admin, or viewer with an active grant |
+| GET | `/documents/:id/download` | Owner/admin or user with an active download grant |
+| DELETE | `/documents/:id` | Owner or admin |
+| POST | `/documents/:id/permissions` | Owner or admin; `{ "email", "level", "expiresAt?" }` |
+| GET | `/documents/:id/permissions` | Owner or admin |
+| DELETE | `/documents/:id/permissions/:permissionId` | Owner or admin |
+| GET | `/audit-logs` | Admin, own company only |
+| GET | `/audit-logs/documents/:id` | Document owner or admin |
+
+Permission `level` is `view` or `download`. Expiration is an ISO-8601 timestamp. Invitation codes are bearer secrets: transfer them only to the intended email recipient using a trusted channel. The invitee selects “Join with a code” on the sign-in screen.
+
+## Audit and reliability notes
+
+Audit events are generated in server handlers, never accepted from client activity claims, and there are no ordinary API endpoints for editing or deleting them. Passwords, JWTs, storage keys, and document contents are excluded. Each event includes MongoDB's event ID, UTC creation timestamp, actor/workspace/document where known, action, outcome, safe metadata, and request correlation ID.
+
+Audit writes are awaited and failures are returned as errors rather than silently treated as success. MongoDB and object storage do not share a transaction: a process crash or service failure between a storage change, metadata update, and audit insert can still leave a partial operation or an incomplete trail. Downloads are audited when the backend successfully reads and serves the file; a client disconnect after that point cannot be distinguished from a completed download. Configure MongoDB backups and monitoring for stronger operational durability.
+
+## Deployment
+
+### Backend on Render
+
+1. Create a Render web service for the repository using `render.yaml` (or select `server/` as its root directory).
+2. Configure `MONGODB_URI` to an Atlas database and allow the Render service to reach it. Restrict Atlas network access as tightly as your hosting setup allows.
+3. Create a private Supabase bucket and set `SUPABASE_URL`, the server-only service-role key, and `SUPABASE_BUCKET`.
+4. Set `CLIENT_ORIGIN` to the exact deployed frontend origin, without a trailing slash.
+5. Verify `GET https://<your-render-service>/api/health`.
+
+### Frontend on Vercel
+
+1. Import the repository and set the Vercel project root directory to `client/`.
+2. Use `npm run build` as the build command and `dist` as the output directory.
+3. Add `VITE_API_URL=https://<your-render-service>/api`.
+4. Set the backend's `CLIENT_ORIGIN` to the exact Vercel deployment origin, then redeploy the backend. In production the cookie is Secure and SameSite=None for the separate frontend/backend origins; unsafe requests with a mismatched browser Origin are rejected. `TRUST_PROXY=1` is configured in `render.yaml` so rate limiting uses the client IP behind Render's proxy.
+5. Test registration, invitation acceptance, file upload, share, revoke, download, and audit visibility with separate test workspaces. Do not claim deployment readiness until these checks pass.
+
+`render.yaml` can provision service settings, but it cannot create accounts, configure an Atlas allowlist, make a Supabase bucket private, or verify a live deployment. Those actions require the project owner.
+
+## Known limitations and honest submission notes
+
+- No live deployment or public GitHub repository has been created from this workspace.
+- There is no email delivery service; admins must send one-time invitation codes to the matching email out-of-band.
+- User accounts are limited to one workspace in the current interface and API.
+- Only PDF, PNG, and JPEG are accepted. Signature validation is not malware scanning.
+- Search is client-side for the loaded document set. Document and audit list pagination, advanced filtering, audit export, and password-reset/email-verification workflows are not implemented.
+- A short-lived signed URL is not used: downloads are proxied through the API to permit an authorization check on every request. This uses server bandwidth and buffers files up to the configured 10 MB limit.
+- During implementation, the workspace router was initially mounted at a path that duplicated `/current`; the mount was corrected to `/api/workspaces` so the defined `/current` endpoints compose correctly. The session cookie was also updated to include an authentication version so logout invalidates the token server-side.
+- Before submission, run the documented tests and build, fix any failures, independently verify deployment, and record any additional corrections actually made.
+
+## Hackathon submission details
+
+- **Title:** TrustVault — Secure Document Sharing with a Real Audit Trail
+- **Summary:** A secure, multi-tenant document-sharing platform with explicit document permissions, server-side access control, and an auditable record of document activity.
+- **Implemented:** See the feature list above; do not describe the app as deployed until deployment is verified.
+- **AI tools used:** This implementation was developed with an AI assistant using Copilot SDK in VS Code.
+- **Live website / public repository:** Not created from this workspace. Add the real URLs only after publishing and testing them.
