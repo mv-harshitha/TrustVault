@@ -2,7 +2,7 @@
 
 TrustVault is a full-stack MVP for private company workspaces, explicitly shared documents, role-checked downloads, and backend-generated audit records. The app keeps file objects private and performs authorization on every document operation.
 
-**Status:** implemented locally, not yet deployed. No production accounts, credentials, public repository, or live website were provided. Do not use real confidential documents until you have configured and independently verified production services.
+**Status:** source is published in the GitHub repository; no live deployment or production credentials were provided. Do not use real confidential documents until you have configured and independently verified production services.
 
 ## Implemented
 
@@ -20,7 +20,7 @@ TrustVault is a full-stack MVP for private company workspaces, explicitly shared
 
 `client/` is a React/Vite single-page application. `server/` is an Express API. MongoDB stores users, companies, memberships, document metadata, permissions, invitations, and audit events. Supabase Storage contains private file objects only.
 
-Authorization is implemented in the API and uses the authenticated user plus the user's database membership. Client-supplied role, company, and owner IDs are not accepted as authorization inputs. Every document lookup is scoped to the authenticated company.
+Authorization is implemented in the API and uses the authenticated user plus the user's current database membership. Client-supplied role, company, and owner IDs are not accepted as authorization inputs. Every document lookup is scoped to the authenticated company, and document grants are rechecked on each read, view, or download. See [API.md](docs/API.md) for route-level access rules and [THREATS.md](THREATS.md) for the threat model and verified limits.
 
 The membership model allows one company membership per user for this MVP. A user account cannot yet switch between multiple workspaces. Audit list endpoints are capped at the latest 100 entries; document lists are capped at 200.
 
@@ -60,6 +60,10 @@ The membership model allows one company membership per user for this MVP. A user
 
    The API listens on port 4000; Vite serves the UI at http://localhost:5173. `npm run dev` needs both ports available.
 
+### Troubleshooting registration
+
+The Create Workspace form sends `POST http://localhost:4000/api/auth/register` by default. If the browser displays `Failed to fetch`, check that both dev servers are running, then open `http://localhost:4000/api/health`. A refused connection means the browser cannot reach the API process. If health responds, inspect the browser Network panel for the registration request and its OPTIONS preflight; configure `CLIENT_ORIGIN` to exactly match the page origin. A validation, duplicate-account, or database error should arrive as an HTTP response; it is different from a browser-level fetch failure. The app does not need Supabase configured to register or log in.
+
 ## Tests and build
 
 Install dependencies first, then run:
@@ -69,11 +73,11 @@ npm test
 npm run build
 ```
 
-The server integration tests use `mongodb-memory-server`; its first run may need to download a MongoDB test binary. They use a fake storage adapter and test-only data. Tests do not connect to production services.
+The server integration tests use `mongodb-memory-server`; its first run may need to download a MongoDB test binary. They use a fake storage adapter and test-only data. Tests do not connect to production services. The security suite checks password hashing, session authentication, CORS preflight, workspace isolation, direct API role restrictions, document grants, expiration, and denied access after revocation. It does not validate live Supabase or production deployment settings.
 
 ## API
 
-All endpoints are prefixed with `/api`. Authentication uses an HttpOnly cookie; the browser client sends it with credentials.
+All endpoints are prefixed with `/api`. Authentication uses an HttpOnly cookie; the browser client sends it with credentials. See [docs/API.md](docs/API.md) for complete endpoint authorization rules and behavior.
 
 | Method | Endpoint | Access |
 | --- | --- | --- |
@@ -114,7 +118,7 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 2. Configure `MONGODB_URI` to an Atlas database and allow the Render service to reach it. Restrict Atlas network access as tightly as your hosting setup allows.
 3. Create a private Supabase bucket and set `SUPABASE_URL`, the server-only service-role key, and `SUPABASE_BUCKET`.
 4. Set `CLIENT_ORIGIN` to the exact deployed frontend origin, without a trailing slash.
-5. Verify `GET https://<your-render-service>/api/health`.
+5. Set the frontend `VITE_API_URL` to `https://<your-render-service>/api` and the backend `CLIENT_ORIGIN` to the exact frontend origin. Verify `GET https://<your-render-service>/api/health` and the CORS preflight from the deployed frontend origin. Health alone does not verify registration, storage, or document authorization; run the documented smoke checks with test accounts before using real documents.
 
 ### Frontend on Vercel
 
@@ -128,7 +132,7 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 
 ## Known limitations and honest submission notes
 
-- No live deployment or public GitHub repository has been created from this workspace.
+- No live deployment has been created. The source repository is [github.com/mv-harshitha/TrustVault](https://github.com/mv-harshitha/TrustVault).
 - There is no email delivery service; admins must send one-time invitation codes to the matching email out-of-band.
 - User accounts are limited to one workspace in the current interface and API.
 - Only PDF, PNG, and JPEG are accepted. Signature validation is not malware scanning.
@@ -143,4 +147,4 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 - **Summary:** A secure, multi-tenant document-sharing platform with explicit document permissions, server-side access control, and an auditable record of document activity.
 - **Implemented:** See the feature list above; do not describe the app as deployed until deployment is verified.
 - **AI tools used:** This implementation was developed with an AI assistant using Copilot SDK in VS Code.
-- **Live website / public repository:** Not created from this workspace. Add the real URLs only after publishing and testing them.
+- **Live website:** Not created. **Public repository:** [github.com/mv-harshitha/TrustVault](https://github.com/mv-harshitha/TrustVault).

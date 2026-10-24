@@ -1,6 +1,7 @@
 import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
+import bcrypt from "bcryptjs";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
 import { setStorageClient } from "../src/config/storage.js";
@@ -16,6 +17,7 @@ let AuditEvent;
 let adminAgent;
 let viewerAgent;
 let documentId;
+let nextTestClientAddress = 1;
 
 const png = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -50,6 +52,26 @@ async function register(agent, email, companyName) {
   });
 }
 
+function createAgent() {
+  const agent = request.agent(app);
+  agent.set("X-Forwarded-For", `192.0.2.${nextTestClientAddress++}`);
+  return agent;
+}
+
+async function inviteMember(admin, email, role) {
+  const invitation = await admin.post("/api/workspaces/current/invitations").send({ email, role });
+  assert.equal(invitation.status, 201);
+  const member = createAgent();
+  const accepted = await member.post("/api/auth/accept-invite").send({
+    name: email.split("@")[0],
+    email,
+    password: "Strong-password-123",
+    invitationCode: invitation.body.invitationCode
+  });
+  assert.equal(accepted.status, 201);
+  return member;
+}
+
 before(async () => {
   process.env.JWT_SECRET = "test-only-secret-with-sufficient-length";
   process.env.CLIENT_ORIGIN = "http://localhost:5173";
@@ -65,6 +87,7 @@ before(async () => {
     import("../src/models/AuditEvent.js")
   ]);
   app = serverApp;
+  app.set("trust proxy", 1);
   User = userModel.default;
   Company = companyModel.default;
   Membership = membershipModel.default;
@@ -83,8 +106,8 @@ beforeEach(async () => {
     Permission.deleteMany({}),
     AuditEvent.deleteMany({})
   ]);
-  adminAgent = request.agent(app);
-  viewerAgent = request.agent(app);
+  adminAgent = createAgent();
+  viewerAgent = createAgent();
   await register(adminAgent, "admin@example.test", "Acme");
   await register(viewerAgent, "outsider@example.test", "Other Company");
 });
@@ -94,13 +117,66 @@ after(async () => {
   await mongo?.stop();
 });
 
+test("registration hashes passwords, creates an admin session, and rejects duplicate accounts", async () => {
+  const agent = createAgent();
+  const response = await register(agent, "new-admin@example.test", "New Workspace");
+
+  assert.equal(response.status, 201);
+  assert.match(response.headers["set-cookie"][0], /HttpOnly/);
+  assert.equal(response.body.role, "admin");
+  assert.equal(response.body.user.email, "new-admin@example.test");
+  assert.equal(response.body.passwordHash, undefined);
+
+  const storedUser = await User.findOne({ email: "new-admin@example.test" }).select("+passwordHash");
+  assert.ok(storedUser.passwordHash.startsWith("$2"));
+  assert.notEqual(storedUser.passwordHash, "Strong-password-123");
+  assert.equal(await bcrypt.compare("Strong-password-123", storedUser.passwordHash), true);
+  assert.equal((await Membership.findOne({ user: storedUser._id })).role, "admin");
+
+  const current = await agent.get("/api/auth/me");
+  assert.equal(current.status, 200);
+  assert.equal(current.body.user.id, String(storedUser._id));
+
+  const duplicate = await register(createAgent(), "new-admin@example.test", "Duplicate Workspace");
+  assert.equal(duplicate.status, 409);
+  assert.equal(await User.countDocuments({ email: "new-admin@example.test" }), 1);
+  assert.equal(await Company.countDocuments({ name: "Duplicate Workspace" }), 0);
+});
+
+test("CORS preflight and registration request errors return readable responses", async () => {
+  const preflight = await request(app).options("/api/auth/register")
+    .set("Origin", "http://localhost:5173")
+    .set("Access-Control-Request-Method", "POST")
+    .set("Access-Control-Request-Headers", "content-type");
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers["access-control-allow-origin"], "http://localhost:5173");
+  assert.equal(preflight.headers["access-control-allow-credentials"], "true");
+
+  const malformed = await request(app).post("/api/auth/register")
+    .set("Origin", "http://localhost:5173")
+    .set("Content-Type", "application/json")
+    .send("{");
+  assert.equal(malformed.status, 400);
+  assert.equal(malformed.headers["access-control-allow-origin"], "http://localhost:5173");
+
+  const usersBeforeUntrustedRequest = await User.countDocuments();
+  const untrusted = await request(app).post("/api/auth/register")
+    .set("Origin", "https://attacker.example")
+    .send({});
+  assert.equal(untrusted.status, 403);
+  assert.equal(await User.countDocuments(), usersBeforeUntrustedRequest);
+});
+
 test("registers and logs in; rejects invalid credentials", async () => {
-  const response = await request(app).post("/api/auth/login").send({
+  const agent = createAgent();
+  const response = await agent.post("/api/auth/login").send({
     email: "admin@example.test",
     password: "Strong-password-123"
   });
   assert.equal(response.status, 200);
   assert.match(response.headers["set-cookie"][0], /HttpOnly/);
+  assert.equal(response.body.passwordHash, undefined);
+  assert.equal((await agent.get("/api/auth/me")).body.user.email, "admin@example.test");
   const invalid = await request(app).post("/api/auth/login").send({
     email: "admin@example.test",
     password: "incorrect"
@@ -111,7 +187,7 @@ test("registers and logs in; rejects invalid credentials", async () => {
 
 test("protects routes without a session and revokes a session at logout", async () => {
   assert.equal((await request(app).get("/api/documents")).status, 401);
-  const agent = request.agent(app);
+  const agent = createAgent();
   await register(agent, "logout@example.test", "Logout Co");
   assert.equal((await agent.post("/api/auth/logout")).status, 204);
   assert.equal((await agent.get("/api/auth/me")).status, 401);
@@ -140,6 +216,9 @@ test("enforces workspace isolation, grant eligibility, permission level, expiry,
     .attach("file", png, { filename: "private.png", contentType: "image/png" });
   documentId = uploaded.body.document.id;
   assert.equal((await viewerAgent.get(`/api/documents/${documentId}`)).status, 404);
+  assert.equal((await viewerAgent.get(`/api/documents/${documentId}/view`)).status, 404);
+  assert.equal((await viewerAgent.get(`/api/documents/${documentId}/download`)).status, 404);
+  assert.equal((await viewerAgent.delete(`/api/documents/${documentId}`)).status, 404);
 
   const outsider = await User.findOne({ email: "outsider@example.test" });
   const outsiderMembership = await Membership.findOne({ user: outsider._id });
@@ -155,12 +234,12 @@ test("enforces workspace isolation, grant eligibility, permission level, expiry,
   const invitation = await adminAgent.post("/api/workspaces/current/invitations")
     .send({ email: "member@example.test", role: "viewer" });
   assert.equal(invitation.status, 201);
-  const joined = await request.agent(app).post("/api/auth/accept-invite").send({
+  const joined = await createAgent().post("/api/auth/accept-invite").send({
     name: "Member", email: "member@example.test", password: "Strong-password-123",
     invitationCode: invitation.body.invitationCode
   });
   assert.equal(joined.status, 201);
-  const member = request.agent(app);
+  const member = createAgent();
   await member.post("/api/auth/login").send({ email: "member@example.test", password: "Strong-password-123" });
 
   const deniedGrant = await member.post(`/api/documents/${documentId}/permissions`)
@@ -170,6 +249,7 @@ test("enforces workspace isolation, grant eligibility, permission level, expiry,
     .send({ email: "member@example.test", level: "view" });
   assert.equal(granted.status, 201);
   assert.equal((await member.get(`/api/documents/${documentId}`)).status, 200);
+  assert.equal((await member.get(`/api/documents/${documentId}/view`)).status, 200);
   assert.equal((await member.get(`/api/documents/${documentId}/download`)).status, 403);
   const downloadGrant = await adminAgent.post(`/api/documents/${documentId}/permissions`)
     .send({ email: "member@example.test", level: "download" });
@@ -177,6 +257,8 @@ test("enforces workspace isolation, grant eligibility, permission level, expiry,
   assert.equal((await member.get(`/api/documents/${documentId}/download`)).status, 200);
   assert.equal((await adminAgent.delete(`/api/documents/${documentId}/permissions/${downloadGrant.body.permission.id}`)).status, 204);
   assert.equal((await member.get(`/api/documents/${documentId}`)).status, 403);
+  assert.equal((await member.get(`/api/documents/${documentId}/view`)).status, 403);
+  assert.equal((await member.get(`/api/documents/${documentId}/download`)).status, 403);
 
   await Permission.create({
     document: documentId,
@@ -191,13 +273,65 @@ test("enforces workspace isolation, grant eligibility, permission level, expiry,
   assert.ok(await AuditEvent.exists({ action: "permission.grant", outcome: "denied" }));
 });
 
+test("owner, administrator, and viewer roles are enforced on direct document API requests", async () => {
+  const adminDocumentResponse = await adminAgent.post("/api/documents")
+    .attach("file", png, { filename: "admin-owned.png", contentType: "image/png" });
+  assert.equal(adminDocumentResponse.status, 201);
+  const adminDocumentId = adminDocumentResponse.body.document.id;
+
+  const owner = await inviteMember(adminAgent, "owner@example.test", "owner");
+  const viewer = await inviteMember(adminAgent, "viewer@example.test", "viewer");
+  const ownerDocumentResponse = await owner.post("/api/documents")
+    .attach("file", png, { filename: "owner-owned.png", contentType: "image/png" });
+  assert.equal(ownerDocumentResponse.status, 201);
+  const ownerDocumentId = ownerDocumentResponse.body.document.id;
+
+  assert.equal((await owner.get(`/api/documents/${ownerDocumentId}`)).status, 200);
+  assert.equal((await adminAgent.get(`/api/documents/${ownerDocumentId}`)).status, 200);
+  assert.equal((await adminAgent.get(`/api/documents/${ownerDocumentId}/download`)).status, 200);
+  assert.equal((await owner.get(`/api/documents/${adminDocumentId}`)).status, 403);
+  assert.equal((await owner.get(`/api/documents/${adminDocumentId}/permissions`)).status, 403);
+  assert.equal((await owner.delete(`/api/documents/${adminDocumentId}`)).status, 403);
+
+  assert.equal((await viewer.post("/api/documents")
+    .attach("file", png, { filename: "forbidden.png", contentType: "image/png" })).status, 403);
+  assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}`)).status, 403);
+  const adminUser = await User.findOne({ email: "admin@example.test" });
+  assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}?userId=${adminUser._id}`)).status, 403);
+  assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}/view`)).status, 403);
+  assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}/download`)).status, 403);
+  assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}/permissions`)).status, 403);
+  assert.equal((await viewer.post(`/api/documents/${ownerDocumentId}/permissions`)
+    .send({ email: "outsider@example.test", level: "download", role: "admin", userId: adminUser._id })).status, 403);
+  assert.equal((await viewer.delete(`/api/documents/${ownerDocumentId}`)).status, 403);
+  assert.equal((await viewer.patch(`/api/documents/${ownerDocumentId}`).send({ name: "renamed.png" })).status, 404);
+
+  const ownerGrant = await owner.post(`/api/documents/${ownerDocumentId}/permissions`)
+    .send({ email: "viewer@example.test", level: "view" });
+  assert.equal(ownerGrant.status, 201);
+  assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}`)).status, 200);
+  assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}/view`)).status, 200);
+  assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}/download`)).status, 403);
+  assert.equal((await viewer.delete(`/api/documents/${ownerDocumentId}/permissions/${ownerGrant.body.permission.id}`)).status, 403);
+
+  assert.equal((await owner.delete(`/api/documents/${ownerDocumentId}/permissions/${ownerGrant.body.permission.id}`)).status, 204);
+  assert.equal((await viewer.get(`/api/documents/${ownerDocumentId}/view`)).status, 403);
+
+  const visibleToViewer = await viewer.get("/api/documents");
+  assert.equal(visibleToViewer.status, 200);
+  assert.deepEqual(visibleToViewer.body.documents, []);
+  const visibleToAdmin = await adminAgent.get("/api/documents");
+  assert.equal(visibleToAdmin.status, 200);
+  assert.equal(visibleToAdmin.body.documents.length, 2);
+});
+
 test("records successful and denied access events and limits audit visibility", async () => {
   const uploaded = await adminAgent.post("/api/documents")
     .attach("file", png, { filename: "audit.png", contentType: "image/png" });
   documentId = uploaded.body.document.id;
   const invitation = await adminAgent.post("/api/workspaces/current/invitations")
     .send({ email: "audit-viewer@example.test", role: "viewer" });
-  const auditViewer = request.agent(app);
+  const auditViewer = createAgent();
   await auditViewer.post("/api/auth/accept-invite").send({
     name: "Audit viewer",
     email: "audit-viewer@example.test",
@@ -217,7 +351,7 @@ test("workspace admins can remove only their own members and revoke their grants
     .attach("file", png, { filename: "remove.png", contentType: "image/png" });
   const invitation = await adminAgent.post("/api/workspaces/current/invitations")
     .send({ email: "removable@example.test", role: "viewer" });
-  const accepted = await request.agent(app).post("/api/auth/accept-invite").send({
+  const accepted = await createAgent().post("/api/auth/accept-invite").send({
     name: "Removable member",
     email: "removable@example.test",
     password: "Strong-password-123",

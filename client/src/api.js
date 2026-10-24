@@ -1,7 +1,18 @@
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
+async function fetchApi(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error("Unable to reach the TrustVault API. Check that the backend is running and CORS allows this frontend origin.");
+    }
+    throw error;
+  }
+}
+
 export async function api(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetchApi(`${API_URL}${path}`, {
     ...options,
     credentials: "include",
     headers: options.body instanceof FormData
@@ -15,7 +26,7 @@ export async function api(path, options = {}) {
 }
 
 export async function getDocumentFile(id, action) {
-  const response = await fetch(`${API_URL}/documents/${id}/${action}`, { credentials: "include" });
+  const response = await fetchApi(`${API_URL}/documents/${id}/${action}`, { credentials: "include" });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || "Unable to access this document");
