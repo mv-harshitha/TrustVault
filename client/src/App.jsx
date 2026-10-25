@@ -227,12 +227,12 @@ export default function App() {
         <a href="#" className="brand" onClick={(event) => { event.preventDefault(); setPage("overview"); }}>
           <span className="brand-mark">T</span><span>trustvault<small>PRIVATE WORKSPACE</small></span>
         </a>
-        <div className="workspace-card"><span className="workspace-icon">⌂</span><span><strong>{account.company?.name || "Your workspace"}</strong><small>{account.role} workspace</small></span><span className="caret">⌄</span></div>
+        <div className="workspace-card"><span className="workspace-icon" aria-hidden="true">⌂</span><span><strong>{account.company?.name || "Your workspace"}</strong><small>{account.role} workspace</small></span></div>
         <nav aria-label="Workspace navigation">
           <span className="nav-heading">WORKSPACE</span>
           {navItems.map(([key, label, icon]) => {
             if ((key === "audit" || key === "members") && account.role !== "admin") return null;
-            return <button key={key} className={`nav-link ${page === key ? "active" : ""}`} onClick={() => { setPage(key); setSelected(null); }}><span className="nav-icon">{icon}</span>{label}{key === "upload" && <span className="nav-plus">↗</span>}</button>;
+            return <button key={key} className={`nav-link ${page === key ? "active" : ""}`} aria-current={page === key ? "page" : undefined} onClick={() => { setPage(key); setSelected(null); }}><span className="nav-icon" aria-hidden="true">{icon}</span><span className="nav-label">{label}</span>{key === "upload" && <span className="nav-plus" aria-hidden="true">↗</span>}</button>;
           })}
         </nav>
         <div className="sidebar-bottom">
@@ -247,7 +247,7 @@ export default function App() {
         </div>
       </aside>
       <main className="main-area">
-        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <strong>{pageTitle(page, selected)}</strong></div><div className="top-actions"><span className="secure-label"><i /> Secure session</span><button className="icon-button" aria-label="Account settings">⚙</button></div></header>
+        <header className="topbar"><div className="breadcrumb"><span className="breadcrumb-root">Workspace</span><span aria-hidden="true">/</span><strong>{pageTitle(page, selected)}</strong></div><div className="top-actions"><span className="secure-label"><i /> Secure session</span></div></header>
         <section className="page-content">
           {preview && <div className="preview-overlay" role="dialog" aria-modal="true" aria-label={`Preview ${preview.filename}`}><div className="preview-dialog"><div className="preview-toolbar"><strong>{preview.filename}</strong><button className="icon-button" onClick={closePreview} aria-label="Close preview">×</button></div><iframe title={`Document preview: ${preview.filename}`} src={preview.url} /></div></div>}
           {notice && <div role="status" className="notice"><span>{notice}</span><button onClick={() => setNotice("")} aria-label="Dismiss notification">×</button></div>}
@@ -325,7 +325,7 @@ function Overview({ account, documents, events, onNavigate, onOpen, onDownload }
 }
 
 function StatCard({ label, value, icon, accent }) {
-  return <div className="stat-card"><span className={`stat-icon ${accent}`}>{icon}</span><span className="stat-label">{label}</span><strong className="stat-value">{value}</strong><span className="stat-caption">In this workspace</span></div>;
+  return <div className="stat-card"><span className={`stat-icon ${accent}`} aria-hidden="true">{icon}</span><span className="stat-label">{label}</span><strong className="stat-value">{value}</strong></div>;
 }
 
 function DocumentsPage({ title, subtitle, documents, filters, setFilters, busy, onOpen, onDownload }) {
