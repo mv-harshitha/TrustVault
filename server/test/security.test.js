@@ -14,6 +14,7 @@ let Membership;
 let Document;
 let Permission;
 let AuditEvent;
+let unauthenticatedDocumentAuditLimiter;
 let adminAgent;
 let viewerAgent;
 let documentId;
@@ -78,6 +79,8 @@ before(async () => {
   process.env.JWT_SECRET = "test-only-secret-with-sufficient-length";
   process.env.CLIENT_ORIGIN = "http://localhost:5173";
   process.env.SUPABASE_BUCKET = "trustvault-private";
+  process.env.UNAUTH_DOCUMENT_AUDIT_LIMIT = "3";
+  process.env.UNAUTH_DOCUMENT_AUDIT_WINDOW_MS = "1000";
   mongo = await MongoMemoryServer.create();
   await mongoose.connect(mongo.getUri());
   const [{ default: serverApp }, userModel, companyModel, membershipModel, documentModel, permissionModel, auditModel] = await Promise.all([
@@ -89,6 +92,7 @@ before(async () => {
     import("../src/models/Permission.js"),
     import("../src/models/AuditEvent.js")
   ]);
+  const authMiddleware = await import("../src/middleware/auth.js");
   app = serverApp;
   app.set("trust proxy", 1);
   User = userModel.default;
@@ -97,6 +101,7 @@ before(async () => {
   Document = documentModel.default;
   Permission = permissionModel.default;
   AuditEvent = auditModel.default;
+  unauthenticatedDocumentAuditLimiter = authMiddleware.unauthenticatedDocumentAuditLimiter;
   setStorageClient(fakeStorage());
 });
 
@@ -190,21 +195,22 @@ test("registers and logs in; rejects invalid credentials", async () => {
 });
 
 test("protects routes without a session and revokes a session at logout", async () => {
-  assert.equal((await request(app).get("/api/documents")).status, 401);
+  const noSession = (method, path) => request(app)[method](path)
+    .set("X-Forwarded-For", `198.51.100.${nextTestClientAddress++}`);
+  assert.equal((await noSession("get", "/api/documents")).status, 401);
   const uploaded = await adminAgent.post("/api/documents").attach("file", png, { filename: "auth-matrix.png", contentType: "image/png" });
   const id = uploaded.body.document.id;
-  const unauthenticated = request(app);
   const protectedRequests = [
-    () => unauthenticated.get(`/api/documents/${id}`),
-    () => unauthenticated.get(`/api/documents/${id}/view`),
-    () => unauthenticated.get(`/api/documents/${id}/download`),
-    () => unauthenticated.patch(`/api/documents/${id}`).send({ name: "forged.png" }),
-    () => unauthenticated.delete(`/api/documents/${id}`),
-    () => unauthenticated.get(`/api/documents/${id}/permissions`),
-    () => unauthenticated.post(`/api/documents/${id}/permissions`).send({ email: "x@example.test", level: "view" }),
-    () => unauthenticated.delete(`/api/documents/${id}/permissions/000000000000000000000001`),
-    () => unauthenticated.get("/api/audit-logs"),
-    () => unauthenticated.get(`/api/audit-logs/documents/${id}`)
+    () => noSession("get", `/api/documents/${id}`),
+    () => noSession("get", `/api/documents/${id}/view`),
+    () => noSession("get", `/api/documents/${id}/download`),
+    () => noSession("patch", `/api/documents/${id}`).send({ name: "forged.png" }),
+    () => noSession("delete", `/api/documents/${id}`),
+    () => noSession("get", `/api/documents/${id}/permissions`),
+    () => noSession("post", `/api/documents/${id}/permissions`).send({ email: "x@example.test", level: "view" }),
+    () => noSession("delete", `/api/documents/${id}/permissions/000000000000000000000001`),
+    () => noSession("get", "/api/audit-logs"),
+    () => noSession("get", `/api/audit-logs/documents/${id}`)
   ];
   const protectedResponses = [];
   for (const operation of protectedRequests) protectedResponses.push(await operation());
@@ -215,31 +221,85 @@ test("protects routes without a session and revokes a session at logout", async 
   assert.equal((await agent.get("/api/auth/me")).status, 401);
 });
 
-test("audits unauthenticated direct requests for an existing document without recording credentials", async () => {
+test("rate limits unauthenticated document audit work and expires the IP window", async () => {
   const uploaded = await adminAgent.post("/api/documents")
     .attach("file", png, { filename: "unauthenticated-audit.png", contentType: "image/png" });
   assert.equal(uploaded.status, 201);
   const id = uploaded.body.document.id;
+  const ip = "203.0.113.240";
+  const originalFindById = Document.findById;
+  const originalAuditCreate = AuditEvent.create;
+  let lookupCount = 0;
+  let auditWriteCount = 0;
+  Document.findById = function (...args) {
+    lookupCount += 1;
+    return originalFindById.apply(this, args);
+  };
+  AuditEvent.create = function (...args) {
+    auditWriteCount += 1;
+    return originalAuditCreate.apply(this, args);
+  };
 
-  const denied = await request(app)
-    .get(`/api/documents/${id}/download`)
-    .set("Authorization", "Bearer harmless-test-token");
-  assert.equal(denied.status, 401);
+  let deniedResponses;
+  let limitedExisting;
+  let limitedUnknown;
+  try {
+    deniedResponses = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      deniedResponses.push(await request(app)
+        .get(`/api/documents/${id}/download`)
+        .set("X-Forwarded-For", ip)
+        .set("Authorization", "Bearer harmless-test-token"));
+    }
+    limitedExisting = await request(app)
+      .get(`/api/documents/${id}/download`)
+      .set("X-Forwarded-For", ip);
+    limitedUnknown = await request(app)
+      .get("/api/documents/000000000000000000000001/download")
+      .set("X-Forwarded-For", ip);
+    assert.deepEqual(deniedResponses.map((response) => response.status), [401, 401, 401]);
+    assert.equal(limitedExisting.status, 429);
+    assert.equal(limitedUnknown.status, 429);
+    assert.deepEqual(limitedExisting.body, limitedUnknown.body);
+    assert.equal(JSON.stringify(limitedExisting.body).includes(id), false);
+    assert.equal(JSON.stringify(limitedExisting.body).includes("Acme"), false);
+    assert.equal(lookupCount, 3);
+    assert.equal(auditWriteCount, 3);
+  } finally {
+    Document.findById = originalFindById;
+    AuditEvent.create = originalAuditCreate;
+  }
 
-  const event = await AuditEvent.findOne({
+  const events = await AuditEvent.find({
     action: "document.access",
     outcome: "denied",
     document: id
   }).lean();
-  assert.ok(event);
-  assert.equal(event.actor, null);
-  assert.equal(String(event.company), String((await Document.findById(id)).company));
-  assert.equal(event.metadata.reason, "missing_session");
-  assert.equal(event.metadata.requestedPath, `/api/documents/${id}/download`);
-  assert.equal(JSON.stringify(event).includes("harmless-test-token"), false);
+  assert.equal(events.length, 3);
+  const document = await Document.findById(id);
+  assert.ok(events.every((event) => event.actor === null));
+  assert.ok(events.every((event) => String(event.company) === String(document.company)));
+  assert.ok(events.every((event) => event.metadata.reason === "missing_session"));
+  assert.ok(events.every((event) => event.metadata.requestedPath === `/api/documents/${id}/download`));
+  assert.ok(events.every((event) => !JSON.stringify(event).includes("harmless-test-token")));
+
+  adminAgent.set("X-Forwarded-For", ip);
+  assert.equal((await adminAgent.get(`/api/documents/${id}/download`)).status, 200);
+
+  const rateInfo = await unauthenticatedDocumentAuditLimiter.getKey(ip);
+  assert.ok(rateInfo?.resetTime instanceof Date);
+  const waitMs = Math.max(0, rateInfo.resetTime.getTime() - Date.now() + 25);
+  await new Promise((resolve) => setTimeout(resolve, waitMs));
+  const afterWindow = await request(app)
+    .get(`/api/documents/${id}/download`)
+    .set("X-Forwarded-For", ip)
+    .set("Authorization", "Bearer harmless-test-token");
+  assert.equal(afterWindow.status, 401);
+  assert.equal(await AuditEvent.countDocuments({ action: "document.access", document: id }), 4);
+
   const visibleToAdmin = await adminAgent.get("/api/audit-logs");
   assert.equal(visibleToAdmin.status, 200);
-  assert.ok(visibleToAdmin.body.events.some((item) => String(item._id) === String(event._id)));
+  assert.ok(visibleToAdmin.body.events.some((item) => item.action === "document.access" && item.document === String(id)));
 });
 
 test("uploads verified files, checks MIME and size, and serves downloads after authorization", async () => {

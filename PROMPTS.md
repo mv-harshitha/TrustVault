@@ -41,3 +41,21 @@
 - **What the user changed:** No source changes were reported for this review.
 - **Verification:** Initial baseline before edits: `npm test` passed 18/18; `npm run build` first failed in the restricted runner with an esbuild `Access is denied` error, then passed with filesystem access (28 modules transformed); `git diff --check` passed. After the changes, `npm test` passed 19/19, `npm run build` passed with 28 modules transformed, and post-change `git diff --check` passed. The updated diff scan found no common credential patterns; real `.env` files remain ignored.
 - **Commit link:** The resulting commit hash and repository URL are reported with this work-log entry; this entry is included in that commit.
+
+## 2026-10-25 — Phase 2 unauthenticated document request rate limiting
+
+- **Prompt summary:** Inspect and mitigate request amplification caused by unauthenticated document requests performing document lookups and audit writes. Preserve denied-access auditing, reject excess requests without revealing resource information, add deterministic route-level tests, document policy and limitations, verify the project, and do not stage, commit, or push.
+- **AI produced:** Reused the existing `express-rate-limit` dependency. Authentication-failure requests to document routes are now limited by IP before document lookup/audit work, with configurable server-side limit/window settings and a generic 429 response. Authenticated operations bypass this unauthenticated-attempt limiter. Added tests for in-limit audits, the 429 boundary, lookup/write counts, response non-disclosure, authenticated access at the same IP, and window expiry. Updated the safe server environment template, README, API docs, and threat model.
+- **What was wrong or remains unverified:** The previous unauthenticated audit flow had no request limit. The default limiter uses per-process memory, so counters reset on process restart and do not coordinate multiple instances; a shared store is needed when scaling. No live Atlas, Supabase, or deployment behavior was tested. No implementation test failures required weakening existing assertions.
+- **What the user changed:** No source changes were reported for this phase.
+- **Verification:** `node --test server/test/security.test.js` passed 14/14. `npm.cmd test` passed 19/19. `npm.cmd run build` passed with Vite 6.4.5 (28 modules transformed). Post-change `git diff --check` passed.
+- **Commit link:** None; no commit was created for this phase.
+
+## 2026-10-25 — Phase 3 security hardening review
+
+- **Prompt summary:** Review authentication, document and permission routes, audit access, upload/download handling, and the Phase 2 IP limiter for verified security issues. Check direct API role/isolation tests, proxy/IP assumptions, error handling, docs, and existing changes; run the targeted and full tests, build, and diff checks; do not change database configuration or stage, commit, or push.
+- **AI produced:** Reviewed server middleware, routes, storage and audit services, validators, models, deployment proxy settings, tests, and security documentation. Found no verified authorization bypass or need for a code fix. Updated the threat model to make the per-process limiter's high-cardinality and trusted-proxy assumptions explicit. Existing route tests exercise cross-workspace isolation, owner/admin/viewer controls, view versus download grants, immediate revocation, audit visibility/immutability, upload validation, and rate limiting.
+- **What was wrong or remains unverified:** Live proxy forwarding behavior and whether a deployment origin can bypass its proxy are not verified; the limiter remains process-local and has no shared-store/cardinality bound. No live MongoDB Atlas, Supabase, or deployed-service behavior was tested. The first sandboxed build attempt failed because esbuild could not read an ancestor directory; the same build passed on retry with the required filesystem access. No application code or tests were changed in this review.
+- **What the user changed:** No source changes were reported for this phase.
+- **Verification:** `node --test server/test/security.test.js` passed 14/14; `npm.cmd test` passed 19/19; `npm.cmd run build` passed with Vite 6.4.5 (28 modules transformed); `git diff --check` passed.
+- **Commit link:** None; no commit was created for this phase.
