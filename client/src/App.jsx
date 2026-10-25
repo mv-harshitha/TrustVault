@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, downloadFile, getDocumentFile } from "./api.js";
+import { api, downloadFile, getDocumentFile, uploadDocument } from "./api.js";
 import { sessionChanged, watchSession } from "./session.js";
+import { validateUploadFile } from "./upload.js";
 
 const navItems = [
   ["overview", "Overview", "◫"],
@@ -30,6 +31,7 @@ export default function App() {
   const sessionObserverRef = useRef(null);
   const sessionEpochRef = useRef(0);
   const [busy, setBusy] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [filters, setFilters] = useState({ name: "", owner: "", category: "", dateFrom: "", dateTo: "" });
 
@@ -121,11 +123,14 @@ export default function App() {
   }
 
   async function logout() {
+    setLogoutBusy(true);
     try {
       await api("/auth/logout", { method: "POST" });
       applySession(false);
     } catch (error) {
-      setNotice(error.message);
+      setNotice(`Sign out failed: ${error.message}`);
+    } finally {
+      setLogoutBusy(false);
     }
   }
 
@@ -232,7 +237,13 @@ export default function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className="security-note"><span className="shield">◈</span><span><strong>Your files stay private</strong><small>Every access is permission-checked and recorded.</small></span></div>
-          <button className="profile" onClick={logout}><span className="avatar">{account.user.name.slice(0, 1).toUpperCase()}</span><span><strong>{account.user.name}</strong><small>{account.user.email}</small></span><span className="logout">↗</span></button>
+          <div className="profile">
+            <span className="avatar">{account.user.name.slice(0, 1).toUpperCase()}</span>
+            <span className="profile-identity"><strong>{account.user.name}</strong><small>{account.user.email}</small></span>
+            <button className="sign-out-button" type="button" onClick={logout} disabled={logoutBusy} aria-label="Sign out">
+              {logoutBusy ? "Signing out..." : "Sign out"}
+            </button>
+          </div>
         </div>
       </aside>
       <main className="main-area">
@@ -340,32 +351,84 @@ function UploadPage({ onUploaded, onError }) {
   const [category, setCategory] = useState("Other");
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [fileError, setFileError] = useState("");
+  const [progress, setProgress] = useState(null);
+  const fileInputRef = useRef(null);
+
+  function selectFile(candidate, input) {
+    const validationError = validateUploadFile(candidate);
+    setFileError(validationError);
+    setFile(validationError ? null : candidate);
+    if (input) input.value = "";
+  }
+
   async function submit(event) {
     event.preventDefault();
-    if (!file) return;
+    const validationError = validateUploadFile(file);
+    if (validationError) {
+      setFileError(validationError);
+      return;
+    }
     setBusy(true);
+    setProgress(0);
+    setFileError("");
     try {
-      const data = new FormData();
-      data.append("file", file);
-      data.append("category", category);
-      await api("/documents", { method: "POST", body: data });
+      await uploadDocument(file, category, setProgress);
       setFile(null);
-      event.currentTarget.reset();
+      setProgress(null);
       await onUploaded();
     } catch (error) {
-      onError(error.message);
+      setProgress(null);
+      onError(`Upload failed: ${error.message}`);
     } finally {
       setBusy(false);
     }
   }
   return <div className="upload-layout"><div><div className="page-heading"><span className="eyebrow">ADD TO YOUR LIBRARY</span><h1>Upload a document</h1><p>Files are stored privately and checked before upload.</p></div><form onSubmit={submit} className="upload-form">
     <label className="upload-category">Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{documentCategories.map((value) => <option key={value}>{value}</option>)}</select></label>
-    <label className={`drop-zone ${dragging ? "dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); setFile(event.dataTransfer.files[0] || null); }}>
-      <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={(event) => setFile(event.target.files[0] || null)} />
-      <span className="upload-icon">↑</span><strong>{file ? file.name : "Drop your file here, or browse"}</strong><small>{file ? sizeLabel(file.size) : "PDF, PNG or JPEG · Maximum size 10 MB"}</small>
-    </label>
+    <div
+      className={`drop-zone ${dragging ? "dragging" : ""}`}
+      role="button"
+      tabIndex={0}
+      aria-label="Choose a PDF, PNG, or JPEG file, or drop it here"
+      aria-disabled={busy}
+      onClick={(event) => {
+        if (!busy && event.target !== fileInputRef.current) fileInputRef.current?.click();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          if (!busy) fileInputRef.current?.click();
+        }
+      }}
+      onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragging(false);
+        if (!busy) selectFile(event.dataTransfer.files[0] || null);
+      }}
+    >
+      <input
+        ref={fileInputRef}
+        className="file-input"
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+        tabIndex={-1}
+        disabled={busy}
+        onChange={(event) => selectFile(event.target.files[0] || null, event.target)}
+      />
+      <span className="upload-icon">↑</span>
+      <strong>{file ? file.name : "Drop your file here, or browse"}</strong>
+      <small>{file ? `${sizeLabel(file.size)} · ${file.type}` : "PDF, PNG or JPEG · Maximum size 10 MB"}</small>
+    </div>
+    {fileError && <p className="upload-error" role="alert">{fileError}</p>}
+    {progress !== null && <div className="upload-progress" role="status" aria-live="polite">
+      {progress < 100 ? `Uploading securely · ${progress}%` : "Upload sent; waiting for private storage and audit confirmation..."}
+      <progress max="100" value={progress} aria-label="Upload progress" />
+    </div>}
     <div className="upload-info"><span>◈</span><span><strong>Private by default</strong><small>Only you and workspace administrators can access this document until you share it.</small></span></div>
-    <button className="primary-button" disabled={!file || busy}>{busy ? "Uploading securely..." : "Upload document"} <span>→</span></button>
+    <button className="primary-button" disabled={!file || Boolean(validateUploadFile(file)) || busy}>{busy ? "Uploading securely..." : "Upload document"} <span>→</span></button>
   </form></div><aside className="upload-aside panel"><span className="quick-icon">⌑</span><h3>Protected from the start</h3><p>Your file is validated, assigned a unique storage name, and kept in private storage. The original filename is used only as display metadata.</p><div className="upload-step"><b>01</b><span><strong>File validation</strong><small>Format and size are checked.</small></span></div><div className="upload-step"><b>02</b><span><strong>Private storage</strong><small>No permanent public link.</small></span></div><div className="upload-step"><b>03</b><span><strong>Audit event</strong><small>Upload is recorded for review.</small></span></div></aside></div>;
 }
 

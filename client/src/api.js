@@ -1,5 +1,13 @@
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
+function readResponseBody(responseText) {
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    return {};
+  }
+}
+
 async function fetchApi(url, options) {
   try {
     return await fetch(url, options);
@@ -23,6 +31,37 @@ export async function api(path, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "Something went wrong");
   return data;
+}
+
+export function uploadDocument(file, category, onProgress = () => {}) {
+  const data = new FormData();
+  data.append("file", file);
+  data.append("category", category);
+
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `${API_URL}/documents`);
+    request.withCredentials = true;
+    request.timeout = 120000;
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    });
+    request.addEventListener("load", () => {
+      const body = readResponseBody(request.responseText);
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(body.error || `Upload failed (HTTP ${request.status}).`));
+        return;
+      }
+      resolve(body);
+    });
+    request.addEventListener("error", () => {
+      reject(new Error("Unable to reach the TrustVault API. Check that the backend is running and CORS allows this frontend origin."));
+    });
+    request.addEventListener("timeout", () => {
+      reject(new Error("The upload timed out. Check your connection and try again."));
+    });
+    request.send(data);
+  });
 }
 
 export async function getDocumentFile(id, action) {
