@@ -11,7 +11,7 @@ TrustVault is a full-stack MVP for private company workspaces, explicitly shared
 - Password hashing with bcrypt, an eight-hour JWT in an HttpOnly cookie, logout invalidation, trusted-origin checks, and rate limits on login, registration, invitation, upload, and member-invitation routes.
 - Private Supabase Storage uploads with server-generated object names. The server checks file signatures and accepts PDF, PNG, and JPEG up to 10 MB.
 - The API checks that the configured Supabase bucket exists and is private before file operations; downloads remain server-mediated and are authorized on each request.
-- Company-scoped document metadata, explicit view/download grants, expiration, revocation, owner/admin management, and authorization on each request.
+- Company-scoped document metadata, explicit view/download/edit grants, expiration, revocation, owner/admin management, and authorization on each request. An edit grant permits metadata edits and preview only, not downloads, deletion, or permission management.
 - Downloads are served through the authenticated backend rather than returning a storage URL, so a revoked grant is checked on the next download request.
 - Persistent MongoDB audit events for registration, login, upload, view, download, permission grants/revocations, deletion, invitations, denied document access, expired grants, and oversized uploads. Audit writes are awaited before success responses.
 - Responsive React workspace UI with login/registration, dashboard, document lists, upload, document permissions, member invitations, and admin audit visibility.
@@ -21,7 +21,9 @@ TrustVault is a full-stack MVP for private company workspaces, explicitly shared
 
 `client/` is a React/Vite single-page application. `server/` is an Express API. MongoDB stores users, companies, memberships, document metadata, permissions, invitations, and audit events. Supabase Storage contains private file objects only.
 
-Authorization is implemented in the API and uses the authenticated user plus the user's current database membership. Client-supplied role, company, and owner IDs are not accepted as authorization inputs. Every document lookup is scoped to the authenticated company, and document grants are rechecked on each read, view, or download. See [API.md](docs/API.md) for route-level access rules and [THREATS.md](THREATS.md) for the threat model and verified limits.
+Authorization is implemented in the API and uses the authenticated user plus the user's current database membership. Client-supplied role, company, and owner IDs are not accepted as authorization inputs. Every document lookup is scoped to the authenticated company, and document grants are rechecked on each read, view, edit, or download. See [API.md](docs/API.md) for route-level access rules and [THREATS.md](THREATS.md) for the threat model and verified limits.
+
+All state-changing API requests require an `Origin` matching the configured `CLIENT_ORIGIN`; missing and untrusted origins are rejected. Non-browser clients must provide that origin and authenticate normally.
 
 The membership model allows one company membership per user for this MVP. A user account cannot yet switch between multiple workspaces. Audit list endpoints are capped at the latest 100 entries; document lists are capped at 200.
 
@@ -109,9 +111,9 @@ All endpoints are prefixed with `/api`. Authentication uses an HttpOnly cookie; 
 | POST | `/workspaces/current/invitations` | Admin |
 | POST | `/documents` | Owner or admin; multipart field `file` |
 | GET | `/documents` | Authenticated; only accessible documents |
-| GET | `/documents/:id` | Owner, admin, or viewer with an active grant |
+| GET | `/documents/:id` | Owner, admin, or member with an active grant |
 | GET | `/documents/:id/download` | Owner/admin or user with an active download grant |
-| PATCH | `/documents/:id` | Owner/admin; set `name` and/or `category` (one of the five categories) |
+| PATCH | `/documents/:id` | Owner/admin or member with an active edit grant; set `name` and/or `category` |
 | DELETE | `/documents/:id` | Owner or admin |
 | POST | `/documents/:id/permissions` | Owner or admin; `{ "email", "level", "expiresAt?" }` |
 | GET | `/documents/:id/permissions` | Owner or admin |
@@ -119,7 +121,7 @@ All endpoints are prefixed with `/api`. Authentication uses an HttpOnly cookie; 
 | GET | `/audit-logs` | Admin, own company only |
 | GET | `/audit-logs/documents/:id` | Document owner or admin |
 
-Permission `level` is `view` or `download`. Expiration is an ISO-8601 timestamp. Invitation codes are bearer secrets: transfer them only to the intended email recipient using a trusted channel. The invitee selects “Join with a code” on the sign-in screen.
+Permission `level` is `view`, `download`, or `edit`. An edit grant allows metadata edits and preview, but not downloads, deletion, permission management, or workspace-role changes. Expiration is an ISO-8601 timestamp. Invitation codes are bearer secrets: transfer them only to the intended email recipient using a trusted channel. The invitee selects “Join with a code” on the sign-in screen.
 
 ## Audit and reliability notes
 

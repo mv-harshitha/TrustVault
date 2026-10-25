@@ -68,3 +68,12 @@
 - **What the user changed:** No source changes were reported.
 - **Verification:** `npm.cmd test` passed 19 server tests and 5 client tests. `npm.cmd run build` passed with Vite 6.4.5 (29 modules transformed). `git diff --check` passed. The restricted build initially failed because esbuild was denied access to an ancestor directory; retry with normal filesystem access passed.
 - **Commit link:** None; changes have not been committed or pushed.
+
+## 2026-10-25 — CSRF origin enforcement and document edit grants
+
+- **Prompt summary:** Close the missing-Origin CSRF defense gap and add named-user per-document edit permissions, preserving existing view/download grants and preventing editors from deleting documents or managing permissions; add direct API regression tests, update security/API documentation, run the full test suite and frontend build, and do not commit or deploy.
+- **AI produced:** State-changing API requests now fail closed when `Origin` is missing or differs from `CLIENT_ORIGIN`. Added the `edit` grant level; editors can read/preview and edit document name/category, while download, deletion, permission management, and workspace-role changes remain separately restricted. Added regression coverage for trusted/missing/hostile origins, cross-workspace edits, edit restrictions, and revocation. Updated README, API documentation, and the threat model.
+- **What was wrong or remains unverified:** Origin middleware previously skipped validation when the header was absent. Per-document permissions had only `view` and `download`, so users could not receive named-user metadata edit access. The first test run found legacy test requests that omitted Origin; those test requests were updated to emulate the configured frontend, without relaxing the policy. Live Vercel/Render behavior, cloud services, and browser-based production CSRF behavior were not tested. Concurrent requests already authorized before revocation may finish.
+- **What the user changed:** No user changes were reported during this phase.
+- **Verification:** `npm.cmd test` passed 20 server tests and 5 client tests (25 total, no failures). `npm.cmd run build` passed with Vite 6.4.5 (29 modules transformed); the sandboxed attempt was denied ancestor-directory access by esbuild and the normal-filesystem retry passed. `git diff --check` passed. No live production deployment was exercised.
+- **Commit link:** None; this work is uncommitted.

@@ -19,7 +19,7 @@ Protected routes return `401` when the session is absent, invalid, expired, or r
 
 Unauthenticated requests to `/api/documents` are limited by client IP before document lookup or denied-access audit writes. The default is 30 requests per 15 minutes; set server-side `UNAUTH_DOCUMENT_AUDIT_LIMIT` and `UNAUTH_DOCUMENT_AUDIT_WINDOW_MS` to change the limit and window. Requests over the limit return a generic `429 Too Many Requests` response that does not identify the document or workspace. Authenticated requests do not consume this limit. The default limiter store is in memory per server process, resets on restart, and does not coordinate multiple instances; use a shared store if deploying multiple instances.
 
-The registration form calls `POST /api/auth/register`. The client API base is `VITE_API_URL`, falling back to `http://localhost:4000/api`. Set the server `CLIENT_ORIGIN` to the exact frontend origin; local development defaults to `http://localhost:5173`. JSON POSTs require a CORS preflight, which Express handles before the trusted-origin middleware.
+The registration form calls `POST /api/auth/register`. The client API base is `VITE_API_URL`, falling back to `http://localhost:4000/api`. Set the server `CLIENT_ORIGIN` to the exact frontend origin; local development defaults to `http://localhost:5173`. JSON POSTs require a CORS preflight, which Express handles before the trusted-origin middleware. State-changing requests require an `Origin` header exactly matching `CLIENT_ORIGIN`; missing and untrusted origins are rejected. Non-browser clients must send that same Origin and authenticate normally; there is no headerless bypass.
 
 If the browser reports `Failed to fetch`, inspect the browser Network panel and check that `GET http://localhost:4000/api/health` responds. A refused connection means the browser cannot reach the API process. A CORS failure means the response is blocked by the browser; check the request's `Origin`, `CLIENT_ORIGIN`, and OPTIONS response. Validation and application errors are HTTP responses with JSON bodies, rather than browser-level fetch failures.
 
@@ -38,12 +38,12 @@ If the browser reports `Failed to fetch`, inspect the browser Network panel and 
 | --- | --- | --- |
 | POST | `/api/documents` | Workspace administrator or `owner` role; upload is signature checked; optional `category` is one of `Finance`, `Legal`, `HR`, `Operations`, or `Other` (defaults to `Other`) |
 | GET | `/api/documents` | Administrator sees company documents; other members see documents they own or have an active grant for. Optional filters: `name`, `owner` (name/email substring), `category`, `dateFrom`, `dateTo` (`YYYY-MM-DD`, UTC, inclusive) |
-| GET | `/api/documents/:id` | Administrator, document owner, or member with an active view/download grant |
-| GET | `/api/documents/:id/view` | Administrator, document owner, or member with an active view/download grant |
+| GET | `/api/documents/:id` | Administrator, document owner, or member with any active `view`, `download`, or `edit` grant |
+| GET | `/api/documents/:id/view` | Administrator, document owner, or member with any active `view`, `download`, or `edit` grant |
 | GET | `/api/documents/:id/download` | Administrator, document owner, or member with an active download grant |
-| PATCH | `/api/documents/:id` | Administrator or document owner; set `name` and/or `category` |
+| PATCH | `/api/documents/:id` | Administrator, document owner, or member with an active edit grant; set `name` and/or `category` |
 | DELETE | `/api/documents/:id` | Administrator or document owner |
-| POST | `/api/documents/:id/permissions` | Administrator or document owner; body uses `email`, `level` (`view` or `download`), and optional ISO-8601 `expiresAt` |
+| POST | `/api/documents/:id/permissions` | Administrator or document owner; body uses `email`, `level` (`view`, `download`, or `edit`), and optional ISO-8601 `expiresAt` |
 | GET | `/api/documents/:id/permissions` | Administrator or document owner |
 | DELETE | `/api/documents/:id/permissions/:permissionId` | Administrator or document owner |
 
@@ -51,7 +51,7 @@ Every document lookup is scoped to the authenticated member's company. A non-adm
 
 Uploads require an explicitly configured `SUPABASE_BUCKET`. Before each upload, download, or delete, the server checks Supabase Storage metadata and refuses to operate unless the bucket exists and reports `public: false`. Objects use server-generated workspace/UUID paths. The browser receives neither the service-role key nor a permanent or signed storage URL; file reads are served through authenticated Express routes after current access checks. Create a private bucket in Supabase Storage, then set backend-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET`. Do not set these in the client environment.
 
-`PATCH /api/documents/:id` edits the document display name and/or category. It is restricted to the document owner or workspace administrator and validates each field on the server. Upload, view, download, edit, delete, grant, revoke, and denied document/permission operations create server-side audit events. Events include actor where authenticated, action, outcome, timestamp, document where known, request ID, and safe HTTP method/route metadata. There is no API for clients to create, edit, or delete audit events. The workspace audit listing is administrator-only; document audit history is limited to that document's owner and administrators.
+`PATCH /api/documents/:id` edits only the document display name and/or category. An `edit` grant also allows document metadata reads and preview, but not file download, deletion, or permission management. It does not change the member's workspace role. The API checks the current grant on each edit request; revocation blocks the next request. Upload, view, download, edit, delete, grant, revoke, and denied document/permission operations create server-side audit events. Events include actor where authenticated, action, outcome, timestamp, document where known, request ID, and safe HTTP method/route metadata. There is no API for clients to create, edit, or delete audit events. The workspace audit listing is administrator-only; document audit history is limited to that document's owner and administrators.
 
 The workspace role `owner` permits uploading, but it does not grant access to every document in that workspace. Document ownership is recorded from the authenticated user at upload time. Workspace administrators can access all documents in their company. Search filters are evaluated by the API after applying the authenticated workspace and active-grant scope, and before its 200-result cap. Owner matching is resolved only against owners of documents in the authenticated workspace, including documents owned by members who were later removed.
 
