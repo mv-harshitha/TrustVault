@@ -24,7 +24,9 @@ Assets include account credentials, workspace membership, document metadata and 
 
 ## Verified behavior and evidence
 
-Run `npm test` for executable evidence of registration, bcrypt hashing and login, session revocation, CORS preflight, cross-workspace isolation, role restrictions, ignored client-supplied identity/role fields, denied direct view/download/delete/update requests, unauthenticated document-access audit events, permission levels, expiration, revocation on subsequent reads, private-bucket enforcement with a fake storage adapter, audit event creation, and read-only audit APIs. Run `npm run build` for the client production build. These checks do not validate a deployed service, live Supabase configuration, or a live MongoDB Atlas connection.
+Run `npm test` for executable evidence of registration, bcrypt hashing and login, session revocation, CORS preflight, trusted/missing/hostile Origin handling, cross-workspace isolation, role restrictions, ignored client-supplied identity/role fields, denied direct view/download/delete/update requests, unauthenticated document-access audit events, permission levels, expiration, revocation on subsequent reads, private-bucket enforcement with a fake storage adapter, audit event creation, and read-only audit APIs. Run `npm run build` for the client production build. These checks use isolated test infrastructure and do not validate live Supabase operations or production user workflows.
+
+Deployment availability was separately checked on 2026-10-25: the Vercel frontend returned the TrustVault page title, and `GET https://trustvault-api-pnvi.onrender.com/api/health` returned HTTP 200 with `{"status":"ok"}`. The API connects to MongoDB before it listens, so this is evidence that connection initialization succeeded at process startup; health is not a live database read/write test and neither result verifies registration, uploads, sharing, permission denial/revocation, or audit workflows on production.
 
 | Threat | Impact | Mitigation | Related automated test | Accepted residual risk |
 | --- | --- | --- | --- | --- |
@@ -41,15 +43,15 @@ Run `npm test` for executable evidence of registration, bcrypt hashing and login
 
 ## Known risks and limits
 
-- No live MongoDB Atlas connection was verified during this change because no Atlas URI was available in the workspace. Tests use an isolated in-memory MongoDB. The operator must verify the Atlas URI, database user permissions, and IP access list.
+- The production MongoDB URI and credentials were not inspected during this documentation pass. The deployed API health response indicates the server completed its MongoDB connection initialization before listening, but no live database read/write or Atlas permission/network test was run. Automated tests use an isolated in-memory MongoDB. The operator should verify the Atlas database user's least privilege and IP access list without disclosing the URI.
 - Any database password or JWT secret previously exposed outside its secure environment must be considered compromised. Rotate the Atlas password and JWT secret; changing `JWT_SECRET` invalidates all existing sessions. These rotations are not automated.
-- Production MongoDB, Supabase, CORS, TLS, proxy, and cookie settings must be configured and verified by the operator. Create a private Supabase Storage bucket, then set backend-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET`; the server rejects buckets that Supabase reports as public. The service-role key bypasses Supabase Storage RLS and belongs only in the backend environment; never commit it or send it to the client.
+- Production MongoDB, Supabase, CORS, TLS, proxy, and cookie settings must be configured and verified by the operator. The supplied frontend origin is `https://trust-vault-ecru.vercel.app`; verify the deployed backend's `CLIENT_ORIGIN` exactly matches it. Create a private Supabase Storage bucket, then set backend-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET`; the server rejects buckets that Supabase reports as public. The service-role key bypasses Supabase Storage RLS and belongs only in the backend environment; never commit it or send it to the client.
 - Integration tests replace Supabase with a fake adapter; they prove the application refuses a bucket reported as public, but they do not prove cloud IAM policy or live storage behavior. No live Supabase bucket was verified during this phase.
 - File signature validation is not malware scanning. Only PDF, PNG, and JPEG are accepted.
 - MongoDB and object storage do not share a transaction. A crash between storage, metadata, and audit operations can leave partial state; for example, a failed metadata deletion after object removal is reported and audited as a failure, but requires operator reconciliation. Audit-write failures cannot make two systems atomic.
 - Registration creates one workspace per user in the current MVP. Invitation codes are bearer credentials and must be delivered to the intended email recipient over a trusted channel; no email delivery is implemented.
 - Document metadata edits are available to the owner, administrator, or explicitly granted editor. Download requires the owner/admin or a download grant. Document deletion and downloads are mediated by the backend, which buffers files up to the configured size limit.
-- A successful local test suite is not evidence of a production deployment or of protection against infrastructure compromise, compromised administrator accounts, or malicious files.
+- Basic deployment reachability and a successful local test suite are not evidence that production user workflows work or that the system is protected against infrastructure compromise, compromised administrator accounts, or malicious files.
 
 ## Audit integrity limits
 

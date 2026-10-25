@@ -40,7 +40,7 @@
 - **What was wrong or remains unverified:** Attempts naming unknown document IDs cannot be associated with a workspace and are not visible in workspace audit views. MongoDB Atlas authentication remains unresolved; these tests do not verify Atlas or live Supabase storage. No deployment was tested. No prior source changes were discarded.
 - **What the user changed:** No source changes were reported for this review.
 - **Verification:** Initial baseline before edits: `npm test` passed 18/18; `npm run build` first failed in the restricted runner with an esbuild `Access is denied` error, then passed with filesystem access (28 modules transformed); `git diff --check` passed. After the changes, `npm test` passed 19/19, `npm run build` passed with 28 modules transformed, and post-change `git diff --check` passed. The updated diff scan found no common credential patterns; real `.env` files remain ignored.
-- **Commit link:** The resulting commit hash and repository URL are reported with this work-log entry; this entry is included in that commit.
+- **Commit link:** [db20f2e6a154ed200260d7cd6f3ae6cb7df4aa5f](https://github.com/mv-harshitha/TrustVault/commit/db20f2e6a154ed200260d7cd6f3ae6cb7df4aa5f).
 
 ## 2026-10-25 — Phase 2 unauthenticated document request rate limiting
 
@@ -49,7 +49,7 @@
 - **What was wrong or remains unverified:** The previous unauthenticated audit flow had no request limit. The default limiter uses per-process memory, so counters reset on process restart and do not coordinate multiple instances; a shared store is needed when scaling. No live Atlas, Supabase, or deployment behavior was tested. No implementation test failures required weakening existing assertions.
 - **What the user changed:** No source changes were reported for this phase.
 - **Verification:** `node --test server/test/security.test.js` passed 14/14. `npm.cmd test` passed 19/19. `npm.cmd run build` passed with Vite 6.4.5 (28 modules transformed). Post-change `git diff --check` passed.
-- **Commit link:** None; no commit was created for this phase.
+- **Commit link:** [738a406ab69cc45ce8af386712800aae6831dbc5](https://github.com/mv-harshitha/TrustVault/commit/738a406ab69cc45ce8af386712800aae6831dbc5).
 
 ## 2026-10-25 — Phase 3 security hardening review
 
@@ -58,7 +58,7 @@
 - **What was wrong or remains unverified:** Live proxy forwarding behavior and whether a deployment origin can bypass its proxy are not verified; the limiter remains process-local and has no shared-store/cardinality bound. No live MongoDB Atlas, Supabase, or deployed-service behavior was tested. The first sandboxed build attempt failed because esbuild could not read an ancestor directory; the same build passed on retry with the required filesystem access. No application code or tests were changed in this review.
 - **What the user changed:** No source changes were reported for this phase.
 - **Verification:** `node --test server/test/security.test.js` passed 14/14; `npm.cmd test` passed 19/19; `npm.cmd run build` passed with Vite 6.4.5 (28 modules transformed); `git diff --check` passed.
-- **Commit link:** None; no commit was created for this phase.
+- **Commit link:** No dedicated implementation commit was created for this review. The later documentation reconciliation is included in [f532cfcc649b2344fed1d55cf6fe076cee801153](https://github.com/mv-harshitha/TrustVault/commit/f532cfcc649b2344fed1d55cf6fe076cee801153).
 
 ## 2026-10-25 - Cross-tab session revalidation
 
@@ -67,7 +67,7 @@
 - **What was wrong or remains unverified:** The tab previously checked its shared HttpOnly cookie only on mount while retaining its role and data in React state; logging into another tab could leave stale Admin controls visible. The actual user browser session was not available for live reproduction. Browser event logic is covered with Node EventTarget tests; cross-browser behavior remains for manual verification.
 - **What the user changed:** No source changes were reported.
 - **Verification:** `npm.cmd test` passed 19 server tests and 5 client tests. `npm.cmd run build` passed with Vite 6.4.5 (29 modules transformed). `git diff --check` passed. The restricted build initially failed because esbuild was denied access to an ancestor directory; retry with normal filesystem access passed.
-- **Commit link:** None; changes have not been committed or pushed.
+- **Commit link:** [433c840d732b2aab7c9c63437ef38991acb7fb6b](https://github.com/mv-harshitha/TrustVault/commit/433c840d732b2aab7c9c63437ef38991acb7fb6b).
 
 ## 2026-10-25 — CSRF origin enforcement and document edit grants
 
@@ -76,4 +76,13 @@
 - **What was wrong or remains unverified:** Origin middleware previously skipped validation when the header was absent. Per-document permissions had only `view` and `download`, so users could not receive named-user metadata edit access. The first test run found legacy test requests that omitted Origin; those test requests were updated to emulate the configured frontend, without relaxing the policy. Live Vercel/Render behavior, cloud services, and browser-based production CSRF behavior were not tested. Concurrent requests already authorized before revocation may finish.
 - **What the user changed:** No user changes were reported during this phase.
 - **Verification:** `npm.cmd test` passed 20 server tests and 5 client tests (25 total, no failures). `npm.cmd run build` passed with Vite 6.4.5 (29 modules transformed); the sandboxed attempt was denied ancestor-directory access by esbuild and the normal-filesystem retry passed. `git diff --check` passed. No live production deployment was exercised.
-- **Commit link:** None; this work is uncommitted.
+- **Commit link:** [2149f097edc0702799145eb5329ce867e6f1f121](https://github.com/mv-harshitha/TrustVault/commit/2149f097edc0702799145eb5329ce867e6f1f121).
+
+## 2026-10-25 — Challenge submission documentation
+
+- **Prompt summary:** Complete the existing README, threat model, AI work log, and API reference; reconcile historical claims with Git; add schema and safe demo guidance, a five-minute walkthrough, and a submission brief; include supplied deployment links; scan tracked content for secrets; run all tests and the production build; do not change application behavior or production settings, and stop before commit/push.
+- **AI produced:** Updated `README.md`, `THREATS.md`, and `docs/API.md`; corrected historical commit links in this file using `git log`; added `DEMO_SCRIPT.md` and `SUBMISSION.md`. The docs describe the three workspace roles, `view`/`download`/`edit` grant boundaries, exact Origin requirements, schema relationships, safe disposable demo accounts, and residual risks.
+- **Deployment evidence and limits:** The supplied Vercel page returned the TrustVault page title and the Render `/api/health` endpoint returned HTTP 200 with `{"status":"ok"}`. This verifies basic reachability only. Production registration, document operations, Supabase file storage, audit workflows, and end-to-end authorization were not exercised.
+- **What the user changed:** No user changes were reported during this documentation pass. No application code or production configuration was changed.
+- **Verification:** `npm test` passed 20 server tests and 5 client tests (25 total, no failures). `npm run build` passed with Vite 6.4.5 (29 modules transformed). `git diff --check` passed. A secret-pattern scan found no high-confidence credentials in scanned project text; known templates and test fixtures were treated as non-production, values were suppressed, and real `.env` files were not read. Final review remains pending.
+- **Commit link:** None; documentation changes are pending user review and have not been committed or pushed.

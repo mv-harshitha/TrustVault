@@ -2,7 +2,11 @@
 
 TrustVault is a full-stack MVP for private company workspaces, explicitly shared documents, role-checked downloads, and backend-generated audit records. The app keeps file objects private and performs authorization on every document operation.
 
-**Status:** source is published in the GitHub repository; no live deployment or production credentials were provided in this workspace. The automated tests use an isolated MongoDB Memory Server, and a live MongoDB Atlas connection has not been verified with project credentials. Do not use real confidential documents until you have configured and independently verified Atlas, Supabase, and the deployment settings.
+**Status:** source is published, and the deployed frontend and backend health endpoint were reachable when checked on 2026-10-25. The frontend returned the TrustVault page title and the backend `/api/health` returned `{"status":"ok"}`. This verifies availability only; it does not verify production registration, document sharing, Supabase file operations, audit visibility, or end-to-end authorization. Do not upload real confidential documents until those production flows and storage configuration have been independently verified.
+
+- **Live frontend:** [https://trust-vault-ecru.vercel.app/](https://trust-vault-ecru.vercel.app/)
+- **Backend health:** [https://trustvault-api-pnvi.onrender.com/api/health](https://trustvault-api-pnvi.onrender.com/api/health)
+- **Public repository:** [https://github.com/mv-harshitha/TrustVault](https://github.com/mv-harshitha/TrustVault)
 
 ## Implemented
 
@@ -26,6 +30,22 @@ Authorization is implemented in the API and uses the authenticated user plus the
 All state-changing API requests require an `Origin` matching the configured `CLIENT_ORIGIN`; missing and untrusted origins are rejected. Non-browser clients must provide that origin and authenticate normally.
 
 The membership model allows one company membership per user for this MVP. A user account cannot yet switch between multiple workspaces. Audit list endpoints are capped at the latest 100 entries; document lists are capped at 200.
+
+## Database schema and relationships
+
+MongoDB uses Mongoose schemas with timestamps and explicit ObjectId references:
+
+| Collection / model | Main relationships and purpose |
+| --- | --- |
+| `Company` | Workspace root. One company has many memberships, documents, invitations, and audit events. |
+| `User` | Account identity and bcrypt password hash (`select: false`). The email has a unique index. |
+| `Membership` | Links a user to a company and assigns `admin`, `owner`, or `viewer`. A unique `(user, company)` index prevents duplicate memberships; the current invitation flow creates one workspace per account. |
+| `Document` | Belongs to a company and an owner user. Stores display name, category, MIME type, size, and a server-generated private-storage path (`select: false`). The file bytes live in private Supabase Storage, not MongoDB. |
+| `Permission` | Named-user grant for one document and company, created by a granting user. Levels are `view`, `download`, or `edit`; grants may expire or be revoked. The partial unique index permits only one unrevoked grant per document/user pair. |
+| `WorkspaceInvite` | Hashed, single-use invitation code for a company/email/role, with expiry and consumption timestamps. Only the token hash is stored. |
+| `AuditEvent` | Append-through-application activity entry with optional actor, company and document references, action, outcome, safe metadata, request ID, and UTC creation time. Ordinary API routes do not mutate or delete events. |
+
+Authorization joins the signed session's user to the current `Membership`; document operations then scope the document to that company and check its owner or current permission. Audit indexes support descending time-based queries by company and document. Mongoose schemas and indexes are defined under `server/src/models/`.
 
 ## Requirements
 
@@ -93,6 +113,20 @@ npm run build
 
 The server integration tests use `mongodb-memory-server`; its first run may need to download a MongoDB test binary. They use a fake storage adapter and test-only data. Tests do not connect to production services or MongoDB Atlas. The security suite checks password hashing, session authentication, CORS preflight, workspace isolation, direct API role restrictions, document grants, expiration, and denied access after revocation. It does not validate live Supabase, Atlas credentials, Atlas network access, or production deployment settings.
 
+## Safe three-role demo accounts
+
+Use a dedicated demo workspace, test-only identities, and synthetic documents (for example, a one-page PDF containing invented text). Do not use confidential files or real personal data. There is no email delivery integration, so the administrator must copy each invitation code and provide it to the intended test user through a private channel.
+
+1. From the deployed frontend, choose **Create an account** and create the demo **Administrator**. This creates a new workspace. Use an email address you control for testing and a unique, strong password that is not used elsewhere.
+2. In **Workspace members**, invite a separate test identity as `owner`. Copy the one-time invitation code, then use **Join with a code** as that invited identity. Repeat with a third identity and the `viewer` role.
+3. As the `owner`, upload a harmless synthetic PDF or image. Open its details and grant the `viewer` the `view` permission (or `edit` for the metadata-edit demonstration). Do not select an identity from a different workspace.
+4. Sign in as the `viewer` and confirm only the explicitly shared document is visible. With `view`, preview should work while download and metadata editing are denied. With `edit`, change only the document name/category; download, delete, and permission management remain denied.
+5. As the `owner`, revoke the grant and verify the next viewer request is denied. As the `Administrator`, inspect workspace audit activity and member roles.
+
+Keep passwords and invitation codes out of slides, source control, logs, and this repository. Production demo accounts and test documents persist until explicitly cleaned up: owners/admins can delete documents and admins can remove members, but this MVP has no workspace/account deletion flow. Plan the demo workspace accordingly.
+
+See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for a timed five-minute walkthrough and [SUBMISSION.md](SUBMISSION.md) for the concise challenge summary.
+
 ## API
 
 All endpoints are prefixed with `/api`. Authentication uses an HttpOnly cookie; the browser client sends it with credentials. See [docs/API.md](docs/API.md) for complete endpoint authorization rules and behavior.
@@ -133,7 +167,7 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 
 ### Backend on Render
 
-1. Create a Render web service for the repository using `render.yaml` (or select `server/` as its root directory).
+1. The deployed backend URL is [https://trustvault-api-pnvi.onrender.com/](https://trustvault-api-pnvi.onrender.com/). Its health endpoint, [https://trustvault-api-pnvi.onrender.com/api/health](https://trustvault-api-pnvi.onrender.com/api/health), returned `{"status":"ok"}` on 2026-10-25. For a new deployment, create a Render web service for the repository using `render.yaml` (or select `server/` as its root directory).
 2. Configure `MONGODB_URI` to an Atlas database as described in [MongoDB Atlas setup](#mongodb-atlas-setup) and allow the Render service to reach it. Restrict Atlas network access as tightly as your hosting setup allows.
 3. Create a **private** Supabase Storage bucket (public access disabled). Set backend-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET` in the server environment. The API checks bucket privacy before each file operation. Never put the service-role key in `client/.env` or a `VITE_` variable. The repository's `server/.env.example` contains placeholders; replace them only in an ignored local `server/.env` or hosting secret settings.
 4. Set `CLIENT_ORIGIN` to the exact deployed frontend origin, without a trailing slash.
@@ -141,7 +175,7 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 
 ### Frontend on Vercel
 
-1. Import the repository and set the Vercel project root directory to `client/`.
+1. The deployed frontend URL is [https://trust-vault-ecru.vercel.app/](https://trust-vault-ecru.vercel.app/); it returned the TrustVault page title on 2026-10-25. For a new deployment, import the repository and set the Vercel project root directory to `client/`.
 2. Use `npm run build` as the build command and `dist` as the output directory.
 3. Add `VITE_API_URL=https://<your-render-service>/api`.
 4. Set the backend's `CLIENT_ORIGIN` to the exact Vercel deployment origin, then redeploy the backend. In production the cookie is Secure and SameSite=None for the separate frontend/backend origins; unsafe requests with a mismatched browser Origin are rejected. `TRUST_PROXY=1` is configured in `render.yaml` so rate limiting uses the client IP behind Render's proxy.
@@ -151,20 +185,22 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 
 ## Known limitations and honest submission notes
 
-- No live deployment has been created. The source repository is [github.com/mv-harshitha/TrustVault](https://github.com/mv-harshitha/TrustVault).
-- MongoDB Atlas connectivity has not been verified in this workspace. The local test suite uses MongoDB Memory Server and does not prove Atlas credentials, network access, or cluster permissions. Any credential previously exposed outside this repository should be treated as compromised and rotated before use with real data.
+- The deployed frontend page and backend health endpoint were reachable, but full production user journeys have not been verified by this documentation check. Health availability does not prove upload, sharing, permission enforcement, or audit behavior works against production services.
+- Automated integration tests use MongoDB Memory Server and fake Supabase storage. They do not validate live Supabase bucket configuration, production document contents, Atlas administrative/network settings, or the complete deployed flows. Any credential previously exposed outside its secure environment should be treated as compromised and rotated before use with real data.
 - There is no email delivery service; admins must send one-time invitation codes to the matching email out-of-band.
 - User accounts are limited to one workspace in the current interface and API.
 - Only PDF, PNG, and JPEG are accepted. Signature validation is not malware scanning.
 - Document search is server-side by name, workspace member owner name/email, category, and inclusive UTC upload-date range. The filtered list is capped at 200 results; pagination, audit export, and password-reset/email-verification workflows are not implemented.
 - A short-lived signed URL is not used: downloads are proxied through the API to permit an authorization check on every request. This uses server bandwidth and buffers files up to the configured 10 MB limit.
 - During implementation, the workspace router was initially mounted at a path that duplicated `/current`; the mount was corrected to `/api/workspaces` so the defined `/current` endpoints compose correctly. The session cookie was also updated to include an authentication version so logout invalidates the token server-side.
-- Before submission, run the documented tests and build, fix any failures, independently verify deployment, and record any additional corrections actually made.
+- Before submission, run the documented tests and build, fix any failures, and demonstrate the production flows with safe test identities and synthetic files. Do not claim flows were verified unless they were exercised.
 
 ## Hackathon submission details
 
 - **Title:** TrustVault — Secure Document Sharing with a Real Audit Trail
 - **Summary:** A secure, multi-tenant document-sharing platform with explicit document permissions, server-side access control, and an auditable record of document activity.
-- **Implemented:** See the feature list above; do not describe the app as deployed until deployment is verified.
+- **Implemented:** See the feature list above. Basic deployed-page and health endpoint availability were verified; complete production functionality was not verified by the documentation pass.
 - **AI tools used:** This implementation was developed with an AI assistant using Copilot SDK in VS Code.
-- **Live website:** Not created. **Public repository:** [github.com/mv-harshitha/TrustVault](https://github.com/mv-harshitha/TrustVault).
+- **Live website:** [https://trust-vault-ecru.vercel.app/](https://trust-vault-ecru.vercel.app/).
+- **Backend health:** [https://trustvault-api-pnvi.onrender.com/api/health](https://trustvault-api-pnvi.onrender.com/api/health).
+- **Public repository:** [github.com/mv-harshitha/TrustVault](https://github.com/mv-harshitha/TrustVault).
