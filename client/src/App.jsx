@@ -353,60 +353,18 @@ function UploadPage({ onUploaded, onError }) {
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState("");
   const [progress, setProgress] = useState(null);
-  const [selectionAttempt, setSelectionAttempt] = useState(0);
-  const [diagnostics, setDiagnostics] = useState({
-    inputClicked: false,
-    changeFired: false,
-    filesReceived: 0,
-    extension: "—",
-    mimeType: "—",
-    size: "—",
-    validation: "Waiting for file selection",
-    reactStateUpdated: false,
-    reactFileSelected: false,
-    nativeInputMounted: false,
-    nativeInputEnabled: false
-  });
-  const fileInputRef = useRef(null);
-  const diagnosticsEnabled = import.meta.env.DEV;
-
-  useEffect(() => {
-    if (!diagnosticsEnabled) return;
-    const input = fileInputRef.current;
-    setDiagnostics((current) => ({
-      ...current,
-      nativeInputMounted: Boolean(input),
-      nativeInputEnabled: Boolean(input && !input.disabled)
-    }));
-  }, [busy, diagnosticsEnabled]);
-
-  useEffect(() => {
-    if (!diagnosticsEnabled || selectionAttempt === 0) return;
-    setDiagnostics((current) => ({
-      ...current,
-      reactStateUpdated: true,
-      reactFileSelected: Boolean(file)
-    }));
-  }, [diagnosticsEnabled, file, selectionAttempt]);
-
-  function selectFile(candidate, input) {
+  function selectFile(candidate) {
     const validationError = validateUploadFile(candidate);
     setFileError(validationError);
     setFile(validationError ? null : candidate);
-    setSelectionAttempt((current) => current + 1);
-    if (diagnosticsEnabled) {
-      const extension = candidate?.name.includes(".")
-        ? candidate.name.split(".").pop().toLowerCase()
-        : "(none)";
-      setDiagnostics((current) => ({
-        ...current,
-        extension,
-        mimeType: candidate?.type || "(empty)",
-        size: candidate ? `${candidate.size} bytes` : "—",
-        validation: validationError ? `Failed: ${validationError}` : "Passed"
-      }));
-    }
-    if (input) input.value = "";
+  }
+
+  function handlePaste(event) {
+    if (busy) return;
+    const candidate = event.clipboardData?.files[0];
+    if (!candidate) return;
+    event.preventDefault();
+    selectFile(candidate);
   }
 
   async function submit(event) {
@@ -422,6 +380,7 @@ function UploadPage({ onUploaded, onError }) {
     try {
       await uploadDocument(file, category, setProgress);
       setFile(null);
+      setFileError("");
       setProgress(null);
       await onUploaded();
     } catch (error) {
@@ -435,50 +394,34 @@ function UploadPage({ onUploaded, onError }) {
     <label className="upload-category">Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{documentCategories.map((value) => <option key={value}>{value}</option>)}</select></label>
     <div
       className={`drop-zone ${dragging ? "dragging" : ""}`}
-      role="group"
-      aria-label="Upload document file"
+      role="region"
+      aria-label="Document upload drop zone"
+      aria-describedby="upload-drop-instructions upload-paste-instructions"
       aria-disabled={busy}
+      tabIndex={busy ? -1 : 0}
+      aria-live="polite"
       onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
       onDrop={(event) => {
         event.preventDefault();
         setDragging(false);
-        if (!busy) selectFile(event.dataTransfer.files[0] || null);
+        if (!busy && event.dataTransfer.files[0]) selectFile(event.dataTransfer.files[0]);
       }}
+      onPaste={handlePaste}
     >
-      <input
-        className="file-input"
-        ref={fileInputRef}
-        type="file"
-        aria-label="Browse files"
-        accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-        disabled={busy}
-        onClick={() => {
-          if (diagnosticsEnabled) setDiagnostics((current) => ({ ...current, inputClicked: true }));
-        }}
-        onChange={(event) => {
-          const filesReceived = event.target.files.length;
-          const candidate = event.target.files[0];
-          if (diagnosticsEnabled) {
-            setDiagnostics((current) => ({
-              ...current,
-              changeFired: true,
-              filesReceived,
-              ...(candidate ? {} : {
-                extension: "—",
-                mimeType: "—",
-                size: "—",
-                validation: "Not run: no file received"
-              })
-            }));
-          }
-          if (candidate) selectFile(candidate, event.target);
-        }}
-      />
-      <span className="upload-icon">↑</span>
-      <strong>{file ? file.name : "Drop your file here, or browse"}</strong>
-      <small>{file ? `${sizeLabel(file.size)} · ${file.type}` : "PDF, PNG or JPEG · Maximum size 10 MB"}</small>
-      <span className="browse-prompt">Browse files</span>
+      {file ? <>
+        <span className="drop-zone-icon selected" aria-hidden="true">✓</span>
+        <span className="drop-zone-title">Document ready</span>
+        <strong className="selected-file-name">{file.name}</strong>
+        <span className="selected-file-size">{sizeLabel(file.size)}</span>
+        <span className="drop-zone-hint" id="upload-drop-instructions">Drop another document to replace this file.</span>
+      </> : <>
+        <span className="drop-zone-icon" aria-hidden="true">↓</span>
+        <span className="drop-zone-title">Add a document to your workspace</span>
+        <strong className="drop-zone-instructions" id="upload-drop-instructions">Drag your document from File Explorer and drop it here.</strong>
+        <span className="drop-zone-hint">PDF, PNG, JPG, or JPEG · Maximum size 10 MB</span>
+      </>}
+      <span className="paste-instructions" id="upload-paste-instructions">Or focus this area and press Ctrl+V to paste a copied file.</span>
     </div>
     {fileError && <p className="upload-error" role="alert">{fileError}</p>}
     {progress !== null && <div className="upload-progress" role="status" aria-live="polite">
@@ -488,22 +431,6 @@ function UploadPage({ onUploaded, onError }) {
     <div className="upload-info"><span>◈</span><span><strong>Private by default</strong><small>Only you and workspace administrators can access this document until you share it.</small></span></div>
     <button className="primary-button" disabled={!file || Boolean(validateUploadFile(file)) || busy}>{busy ? "Uploading securely..." : "Upload document"} <span>→</span></button>
   </form>
-    {diagnosticsEnabled && <section className="upload-diagnostics" aria-label="Development file input diagnostics" aria-live="polite">
-      <h2>Development diagnostics</h2>
-      <dl>
-        <dt>Native input received a click</dt><dd>{diagnostics.inputClicked ? "Yes" : "No"}</dd>
-        <dt>Native input change event fired</dt><dd>{diagnostics.changeFired ? "Yes" : "No"}</dd>
-        <dt>Files received</dt><dd>{diagnostics.filesReceived}</dd>
-        <dt>Selected file extension</dt><dd>{diagnostics.extension}</dd>
-        <dt>Selected file MIME type</dt><dd>{diagnostics.mimeType}</dd>
-        <dt>Selected file size</dt><dd>{diagnostics.size}</dd>
-        <dt>Validation</dt><dd>{diagnostics.validation}</dd>
-        <dt>React selected-file state updated</dt><dd>{diagnostics.reactStateUpdated ? "Yes" : "No"}</dd>
-        <dt>React currently has a selected file</dt><dd>{diagnostics.reactFileSelected ? "Yes" : "No"}</dd>
-        <dt>Native input remains mounted</dt><dd>{diagnostics.nativeInputMounted ? "Yes" : "No"}</dd>
-        <dt>Native input is enabled</dt><dd>{diagnostics.nativeInputEnabled ? "Yes" : "No"}</dd>
-      </dl>
-    </section>}
   </div><aside className="upload-aside panel"><span className="quick-icon">⌑</span><h3>Protected from the start</h3><p>Your file is validated, assigned a unique storage name, and kept in private storage. The original filename is used only as display metadata.</p><div className="upload-step"><b>01</b><span><strong>File validation</strong><small>Format and size are checked.</small></span></div><div className="upload-step"><b>02</b><span><strong>Private storage</strong><small>No permanent public link.</small></span></div><div className="upload-step"><b>03</b><span><strong>Audit event</strong><small>Upload is recorded for review.</small></span></div></aside></div>;
 }
 

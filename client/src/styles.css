@@ -142,23 +142,21 @@ tr:last-child td { border-bottom: 0; }
 .empty-icon { color: #91a6d6; background: #f1f5ff; border-radius: 12px; width: 39px; height: 39px; display: grid; place-items: center; font-size: 19px; }
 .upload-layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(220px, .8fr); gap: 20px; align-items: start; }
 .upload-form { background: white; border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
-.drop-zone { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 190px; border: 1px dashed #cbd6e4; background: #fbfcfe; border-radius: 7px; cursor: pointer; transition: .15s; text-align: center; padding: 18px; }
-.drop-zone:hover, .drop-zone.dragging { border-color: #6c8ce1; background: #f4f7ff; }
-.drop-zone:focus-within { outline: 2px solid #6c8ce1; outline-offset: 3px; }
-.drop-zone[aria-disabled="true"] { cursor: wait; opacity: .7; }
-.file-input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
-.browse-prompt { margin-top: 12px; border: 1px solid #dce3ec; border-radius: 6px; background: #fff; color: #53647b; padding: 8px 12px; font-size: 10px; font-weight: 600; }
-.upload-icon { width: 39px; height: 39px; border-radius: 50%; background: #edf2ff; color: #5273ca; display: grid; place-items: center; font-size: 21px; margin-bottom: 12px; }
-.drop-zone strong { font-size: 11px; }
-.drop-zone small { color: #97a2b0; margin-top: 7px; font-size: 9px; }
+.drop-zone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 260px; border: 2px dashed #b9c9e8; background: linear-gradient(145deg, #f8faff, #f2f6ff); border-radius: 11px; transition: border-color .15s, background .15s, box-shadow .15s; text-align: center; padding: 28px 22px; color: var(--ink); }
+.drop-zone:focus-visible { outline: 3px solid #6c8ce1; outline-offset: 3px; }
+.drop-zone.dragging { border-color: #3968d7; background: #eaf0ff; box-shadow: inset 0 0 0 1px #3968d7; }
+.drop-zone[aria-disabled="true"] { opacity: .7; }
+.drop-zone-icon { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; background: #e7eeff; color: #3968d7; font-size: 29px; font-weight: 600; }
+.drop-zone-icon.selected { background: #e7f6ee; color: #218555; font-size: 25px; }
+.drop-zone-title { color: #435064; font-size: 14px; font-weight: 700; }
+.drop-zone-instructions { max-width: 440px; color: #294c95; font-size: 13px; line-height: 1.55; }
+.drop-zone-hint, .paste-instructions { color: #7c899a; font-size: 10px; line-height: 1.5; }
+.paste-instructions { margin-top: 3px; }
+.selected-file-name { max-width: 100%; overflow-wrap: anywhere; color: #233144; font-size: 13px; }
+.selected-file-size { color: #218555; font-size: 11px; font-weight: 600; }
 .upload-error { margin: 10px 0 0; color: #ad3f4b; font-size: 11px; }
 .upload-progress { display: grid; gap: 7px; margin: 12px 0; color: #536a9c; font-size: 10px; }
 .upload-progress progress { width: 100%; height: 8px; accent-color: var(--blue); }
-.upload-diagnostics { margin-top: 14px; padding: 15px 18px; border: 1px solid #d5deed; border-radius: 8px; background: #f8faff; }
-.upload-diagnostics h2 { margin: 0 0 10px; color: #435064; font-size: 12px; }
-.upload-diagnostics dl { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 1.3fr); gap: 7px 14px; margin: 0; font-size: 10px; }
-.upload-diagnostics dt { color: #778596; }
-.upload-diagnostics dd { margin: 0; color: #26364c; overflow-wrap: anywhere; }
 .upload-info { margin: 15px 0; display: flex; gap: 10px; border: 1px solid #e9eef7; background: #f8faff; border-radius: 6px; padding: 11px; color: #6280c5; }
 .upload-info strong, .upload-info small { display: block; }
 .upload-info strong { color: #425475; font-size: 9px; margin-bottom: 4px; }
@@ -297,8 +295,7 @@ input:focus, select:focus { border-color: #6685dc; box-shadow: 0 0 0 2px #6685dc
   .page-content { padding: 25px 16px 35px; }
   .welcome-row { align-items: flex-start; gap: 12px; flex-direction: column; }
   .welcome-row h1, .page-heading h1 { font-size: 22px; }
-  .upload-diagnostics dl { grid-template-columns: 1fr; gap: 3px; }
-  .upload-diagnostics dd { margin-bottom: 5px; }
+  .drop-zone { min-height: 230px; padding: 22px 16px; }
   .stat-grid { gap: 8px; margin: 19px 0 24px; }
   .stat-card { padding: 12px; min-height: 125px; }
   .overview-lower, .upload-layout, .detail-grid { grid-template-columns: 1fr; }
