@@ -353,19 +353,60 @@ function UploadPage({ onUploaded, onError }) {
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState("");
   const [progress, setProgress] = useState(null);
+  const [selectionAttempt, setSelectionAttempt] = useState(0);
+  const [diagnostics, setDiagnostics] = useState({
+    inputClicked: false,
+    changeFired: false,
+    filesReceived: 0,
+    extension: "—",
+    mimeType: "—",
+    size: "—",
+    validation: "Waiting for file selection",
+    reactStateUpdated: false,
+    reactFileSelected: false,
+    nativeInputMounted: false,
+    nativeInputEnabled: false
+  });
   const fileInputRef = useRef(null);
+  const diagnosticsEnabled = import.meta.env.DEV;
+
+  useEffect(() => {
+    if (!diagnosticsEnabled) return;
+    const input = fileInputRef.current;
+    setDiagnostics((current) => ({
+      ...current,
+      nativeInputMounted: Boolean(input),
+      nativeInputEnabled: Boolean(input && !input.disabled)
+    }));
+  }, [busy, diagnosticsEnabled]);
+
+  useEffect(() => {
+    if (!diagnosticsEnabled || selectionAttempt === 0) return;
+    setDiagnostics((current) => ({
+      ...current,
+      reactStateUpdated: true,
+      reactFileSelected: Boolean(file)
+    }));
+  }, [diagnosticsEnabled, file, selectionAttempt]);
 
   function selectFile(candidate, input) {
     const validationError = validateUploadFile(candidate);
     setFileError(validationError);
     setFile(validationError ? null : candidate);
+    setSelectionAttempt((current) => current + 1);
+    if (diagnosticsEnabled) {
+      const extension = candidate?.name.includes(".")
+        ? candidate.name.split(".").pop().toLowerCase()
+        : "(none)";
+      setDiagnostics((current) => ({
+        ...current,
+        extension,
+        mimeType: candidate?.type || "(empty)",
+        size: candidate ? `${candidate.size} bytes` : "—",
+        validation: validationError ? `Failed: ${validationError}` : "Passed"
+      }));
+    }
     if (input) input.value = "";
-  }
-
-  function openFilePicker(event) {
-    if (busy) return;
-    if (event.target.closest("button")) return;
-    fileInputRef.current?.click();
   }
 
   async function submit(event) {
@@ -397,7 +438,6 @@ function UploadPage({ onUploaded, onError }) {
       role="group"
       aria-label="Upload document file"
       aria-disabled={busy}
-      onClick={openFilePicker}
       onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
       onDrop={(event) => {
@@ -407,20 +447,38 @@ function UploadPage({ onUploaded, onError }) {
       }}
     >
       <input
-        ref={fileInputRef}
         className="file-input"
+        ref={fileInputRef}
         type="file"
+        aria-label="Browse files"
         accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-        tabIndex={-1}
         disabled={busy}
-        onChange={(event) => selectFile(event.target.files[0] || null, event.target)}
+        onClick={() => {
+          if (diagnosticsEnabled) setDiagnostics((current) => ({ ...current, inputClicked: true }));
+        }}
+        onChange={(event) => {
+          const filesReceived = event.target.files.length;
+          const candidate = event.target.files[0];
+          if (diagnosticsEnabled) {
+            setDiagnostics((current) => ({
+              ...current,
+              changeFired: true,
+              filesReceived,
+              ...(candidate ? {} : {
+                extension: "—",
+                mimeType: "—",
+                size: "—",
+                validation: "Not run: no file received"
+              })
+            }));
+          }
+          if (candidate) selectFile(candidate, event.target);
+        }}
       />
       <span className="upload-icon">↑</span>
       <strong>{file ? file.name : "Drop your file here, or browse"}</strong>
       <small>{file ? `${sizeLabel(file.size)} · ${file.type}` : "PDF, PNG or JPEG · Maximum size 10 MB"}</small>
-      <button className="browse-button" type="button" disabled={busy} onClick={(event) => { event.stopPropagation(); fileInputRef.current?.click(); }}>
-        Browse files
-      </button>
+      <span className="browse-prompt">Browse files</span>
     </div>
     {fileError && <p className="upload-error" role="alert">{fileError}</p>}
     {progress !== null && <div className="upload-progress" role="status" aria-live="polite">
@@ -429,7 +487,24 @@ function UploadPage({ onUploaded, onError }) {
     </div>}
     <div className="upload-info"><span>◈</span><span><strong>Private by default</strong><small>Only you and workspace administrators can access this document until you share it.</small></span></div>
     <button className="primary-button" disabled={!file || Boolean(validateUploadFile(file)) || busy}>{busy ? "Uploading securely..." : "Upload document"} <span>→</span></button>
-  </form></div><aside className="upload-aside panel"><span className="quick-icon">⌑</span><h3>Protected from the start</h3><p>Your file is validated, assigned a unique storage name, and kept in private storage. The original filename is used only as display metadata.</p><div className="upload-step"><b>01</b><span><strong>File validation</strong><small>Format and size are checked.</small></span></div><div className="upload-step"><b>02</b><span><strong>Private storage</strong><small>No permanent public link.</small></span></div><div className="upload-step"><b>03</b><span><strong>Audit event</strong><small>Upload is recorded for review.</small></span></div></aside></div>;
+  </form>
+    {diagnosticsEnabled && <section className="upload-diagnostics" aria-label="Development file input diagnostics" aria-live="polite">
+      <h2>Development diagnostics</h2>
+      <dl>
+        <dt>Native input received a click</dt><dd>{diagnostics.inputClicked ? "Yes" : "No"}</dd>
+        <dt>Native input change event fired</dt><dd>{diagnostics.changeFired ? "Yes" : "No"}</dd>
+        <dt>Files received</dt><dd>{diagnostics.filesReceived}</dd>
+        <dt>Selected file extension</dt><dd>{diagnostics.extension}</dd>
+        <dt>Selected file MIME type</dt><dd>{diagnostics.mimeType}</dd>
+        <dt>Selected file size</dt><dd>{diagnostics.size}</dd>
+        <dt>Validation</dt><dd>{diagnostics.validation}</dd>
+        <dt>React selected-file state updated</dt><dd>{diagnostics.reactStateUpdated ? "Yes" : "No"}</dd>
+        <dt>React currently has a selected file</dt><dd>{diagnostics.reactFileSelected ? "Yes" : "No"}</dd>
+        <dt>Native input remains mounted</dt><dd>{diagnostics.nativeInputMounted ? "Yes" : "No"}</dd>
+        <dt>Native input is enabled</dt><dd>{diagnostics.nativeInputEnabled ? "Yes" : "No"}</dd>
+      </dl>
+    </section>}
+  </div><aside className="upload-aside panel"><span className="quick-icon">⌑</span><h3>Protected from the start</h3><p>Your file is validated, assigned a unique storage name, and kept in private storage. The original filename is used only as display metadata.</p><div className="upload-step"><b>01</b><span><strong>File validation</strong><small>Format and size are checked.</small></span></div><div className="upload-step"><b>02</b><span><strong>Private storage</strong><small>No permanent public link.</small></span></div><div className="upload-step"><b>03</b><span><strong>Audit event</strong><small>Upload is recorded for review.</small></span></div></aside></div>;
 }
 
 function DocumentDetails({ document, permissions, events, account, sessionEpochRef, onBack, onView, onDownload, onDelete, onUpdate, onError, onPermissions }) {
