@@ -59,3 +59,12 @@
 - **What the user changed:** No source changes were reported for this phase.
 - **Verification:** `node --test server/test/security.test.js` passed 14/14; `npm.cmd test` passed 19/19; `npm.cmd run build` passed with Vite 6.4.5 (28 modules transformed); `git diff --check` passed.
 - **Commit link:** None; no commit was created for this phase.
+
+## 2026-10-25 - Cross-tab session revalidation
+
+- **Prompt summary:** Fix stale Admin UI when another TrustVault tab signs in as a Viewer. Revalidate the current session on focus/visibility, clear account-scoped data if identity/workspace/role changes, fail closed for invalid sessions, add regression coverage, run security tests and the frontend production build, and do not commit or push.
+- **AI produced:** Added a browser session observer that rechecks `/api/auth/me` on startup, tab focus, and visibility restoration. The UI is suspended during checks; changed or invalid sessions clear documents, permissions, audit/member views, filters, and preview URLs. Login now adopts the server-verified session, logout clears all account-scoped state, and out-of-order checks cannot restore a stale identity. Added dependency-free client tests and included them in root `npm test`.
+- **What was wrong or remains unverified:** The tab previously checked its shared HttpOnly cookie only on mount while retaining its role and data in React state; logging into another tab could leave stale Admin controls visible. The actual user browser session was not available for live reproduction. Browser event logic is covered with Node EventTarget tests; cross-browser behavior remains for manual verification.
+- **What the user changed:** No source changes were reported.
+- **Verification:** `npm.cmd test` passed 19 server tests and 5 client tests. `npm.cmd run build` passed with Vite 6.4.5 (29 modules transformed). `git diff --check` passed. The restricted build initially failed because esbuild was denied access to an ancestor directory; retry with normal filesystem access passed.
+- **Commit link:** None; changes have not been committed or pushed.

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, downloadFile, getDocumentFile } from "./api.js";
+import { sessionChanged, watchSession } from "./session.js";
 
 const navItems = [
   ["overview", "Overview", "◫"],
@@ -15,6 +16,7 @@ const sizeLabel = (bytes) => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(byt
 
 export default function App() {
   const [account, setAccount] = useState(null);
+  const [sessionChecking, setSessionChecking] = useState(true);
   const [page, setPage] = useState("overview");
   const [documents, setDocuments] = useState([]);
   const [events, setEvents] = useState([]);
@@ -23,26 +25,65 @@ export default function App() {
   const [permissions, setPermissions] = useState([]);
   const [documentEvents, setDocumentEvents] = useState([]);
   const [preview, setPreview] = useState(null);
+  const accountRef = useRef(null);
+  const previewRef = useRef(null);
+  const sessionObserverRef = useRef(null);
+  const sessionEpochRef = useRef(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [filters, setFilters] = useState({ name: "", owner: "", category: "", dateFrom: "", dateTo: "" });
 
   const refresh = useCallback(async () => {
     if (!account) return false;
+    const requestEpoch = sessionEpochRef.current;
     try {
       const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
       const result = await api(`/documents${params.size ? `?${params}` : ""}`);
+      if (requestEpoch !== sessionEpochRef.current) return false;
       setDocuments(result.documents);
       return true;
     } catch (error) {
-      setNotice(error.message);
+      if (requestEpoch === sessionEpochRef.current) setNotice(error.message);
       return false;
     }
   }, [account, filters]);
 
-  useEffect(() => {
-    api("/auth/me").then(setAccount).catch(() => setAccount(false));
+  const clearAccountState = useCallback(() => {
+    sessionEpochRef.current += 1;
+    setDocuments([]);
+    setEvents([]);
+    setMembers([]);
+    setSelected(null);
+    setPermissions([]);
+    setDocumentEvents([]);
+    if (previewRef.current?.url) URL.revokeObjectURL(previewRef.current.url);
+    previewRef.current = null;
+    setPreview(null);
+    setFilters({ name: "", owner: "", category: "", dateFrom: "", dateTo: "" });
+    setPage("overview");
+    setNotice("");
   }, []);
+
+  const applySession = useCallback((nextSession) => {
+    if (sessionChanged(accountRef.current, nextSession)) clearAccountState();
+    accountRef.current = nextSession;
+    setAccount(nextSession);
+  }, [clearAccountState]);
+
+  useEffect(() => {
+    const observer = watchSession({
+      loadSession: () => api("/auth/me"),
+      onSession: applySession,
+      onChecking: setSessionChecking,
+      windowTarget: window,
+      documentTarget: document
+    });
+    sessionObserverRef.current = observer;
+    return () => {
+      observer.stop();
+      if (sessionObserverRef.current === observer) sessionObserverRef.current = null;
+    };
+  }, [applySession]);
 
   useEffect(() => {
     const timer = window.setTimeout(refresh, 250);
@@ -51,10 +92,20 @@ export default function App() {
 
   useEffect(() => {
     if ((page === "audit" || page === "overview") && account?.role === "admin") {
-      api("/audit-logs").then((result) => setEvents(result.events)).catch((error) => setNotice(error.message));
+      const requestEpoch = sessionEpochRef.current;
+      api("/audit-logs").then((result) => {
+        if (requestEpoch === sessionEpochRef.current) setEvents(result.events);
+      }).catch((error) => {
+        if (requestEpoch === sessionEpochRef.current) setNotice(error.message);
+      });
     }
     if (page === "members" && account?.role === "admin") {
-      api("/workspaces/current/members").then((result) => setMembers(result.members)).catch((error) => setNotice(error.message));
+      const requestEpoch = sessionEpochRef.current;
+      api("/workspaces/current/members").then((result) => {
+        if (requestEpoch === sessionEpochRef.current) setMembers(result.members);
+      }).catch((error) => {
+        if (requestEpoch === sessionEpochRef.current) setNotice(error.message);
+      });
     }
   }, [page, account]);
 
@@ -63,83 +114,95 @@ export default function App() {
     return page === "shared" ? !owned : page === "documents" ? owned : true;
   }), [documents, page, account]);
 
-  async function signIn(result) {
-    setAccount({
-      user: result.user,
-      role: result.role,
-      company: { name: result.company }
-    });
+  async function signIn() {
+    const session = await sessionObserverRef.current?.revalidate();
+    if (!session) throw new Error("Unable to verify your session. Please sign in again.");
     setPage("overview");
   }
 
   async function logout() {
     try {
       await api("/auth/logout", { method: "POST" });
-      setAccount(false);
-      setDocuments([]);
+      applySession(false);
     } catch (error) {
       setNotice(error.message);
     }
   }
 
   async function openDocument(document) {
+    const requestEpoch = sessionEpochRef.current;
     setBusy(true);
     setNotice("");
     try {
       const result = await api(`/documents/${document.id}`);
+      if (requestEpoch !== sessionEpochRef.current) return;
       setSelected(result.document);
       if (account.role === "admin" || String(document.owner.id) === String(account.user.id)) {
         const grants = await api(`/documents/${document.id}/permissions`);
+        if (requestEpoch !== sessionEpochRef.current) return;
         setPermissions(grants.permissions);
         const activity = await api(`/audit-logs/documents/${document.id}`);
+        if (requestEpoch !== sessionEpochRef.current) return;
         setDocumentEvents(activity.events);
       } else {
         setPermissions([]);
         setDocumentEvents([]);
       }
     } catch (error) {
-      setNotice(error.message);
+      if (requestEpoch === sessionEpochRef.current) setNotice(error.message);
     } finally {
-      setBusy(false);
+      if (requestEpoch === sessionEpochRef.current) setBusy(false);
     }
   }
 
   async function downloadDocument(documentId) {
+    const requestEpoch = sessionEpochRef.current;
     try {
       await downloadFile(documentId);
     } catch (error) {
-      setNotice(error.message);
+      if (requestEpoch === sessionEpochRef.current) setNotice(error.message);
     }
   }
 
   async function viewDocument(documentId) {
+    const requestEpoch = sessionEpochRef.current;
     try {
       const file = await getDocumentFile(documentId, "view");
+      if (requestEpoch !== sessionEpochRef.current) {
+        URL.revokeObjectURL(file.url);
+        return;
+      }
+      previewRef.current = file;
       setPreview(file);
     } catch (error) {
-      setNotice(error.message);
+      if (requestEpoch === sessionEpochRef.current) setNotice(error.message);
     }
   }
 
   function closePreview() {
     if (preview?.url) URL.revokeObjectURL(preview.url);
+    previewRef.current = null;
     setPreview(null);
   }
 
   async function deleteDocument(documentId) {
     if (!window.confirm("Delete this document permanently?")) return;
+    const requestEpoch = sessionEpochRef.current;
     try {
       await api(`/documents/${documentId}`, { method: "DELETE" });
+      if (requestEpoch !== sessionEpochRef.current) return;
       setSelected(null);
       await refresh();
       setNotice("Document deleted");
     } catch (error) {
-      setNotice(error.message);
+      if (requestEpoch === sessionEpochRef.current) setNotice(error.message);
     }
   }
 
   async function updateDocument(documentId, changes) {
+    const requestEpoch = sessionEpochRef.current;
     const result = await api(`/documents/${documentId}`, { method: "PATCH", body: JSON.stringify(changes) });
+    if (requestEpoch !== sessionEpochRef.current) return;
     setSelected((current) => current && String(current.id) === String(documentId)
       ? { ...current, name: result.document.name, category: result.document.category }
       : current);
@@ -150,7 +213,7 @@ export default function App() {
     if (refreshed) setNotice("Document details updated");
   }
 
-  if (account === null) return <div className="boot-screen"><div className="brand-mark">T</div><p>Opening your secure workspace...</p></div>;
+  if (account === null || sessionChecking) return <div className="boot-screen"><div className="brand-mark">T</div><p>Opening your secure workspace...</p></div>;
   if (!account) return <AuthScreen onSuccess={signIn} />;
 
   return (
@@ -180,7 +243,7 @@ export default function App() {
           {page === "overview" && <Overview account={account} documents={documents} events={events} onNavigate={setPage} onOpen={(doc) => { setPage("documents"); openDocument(doc); }} onDownload={downloadDocument} />}
           {page === "upload" && <UploadPage onUploaded={async () => { await refresh(); setPage("documents"); setNotice("Document uploaded securely"); }} onError={setNotice} />}
           {(page === "documents" || page === "shared") && (selected
-            ? <DocumentDetails document={selected} permissions={permissions} events={documentEvents} account={account} onBack={() => setSelected(null)} onView={viewDocument} onDownload={downloadDocument} onDelete={deleteDocument} onUpdate={updateDocument} onError={setNotice} onPermissions={setPermissions} />
+            ? <DocumentDetails document={selected} permissions={permissions} events={documentEvents} account={account} sessionEpochRef={sessionEpochRef} onBack={() => setSelected(null)} onView={viewDocument} onDownload={downloadDocument} onDelete={deleteDocument} onUpdate={updateDocument} onError={setNotice} onPermissions={setPermissions} />
             : <DocumentsPage title={page === "shared" ? "Shared with me" : "My documents"} subtitle={page === "shared" ? "Documents other workspace members have shared with you." : "Documents you own and manage."} documents={filteredDocs} filters={filters} setFilters={setFilters} busy={busy} onOpen={openDocument} onDownload={downloadDocument} />)}
           {page === "audit" && <AuditPage events={events} />}
           {page === "members" && <MembersPage members={members} account={account} onMembers={setMembers} onError={setNotice} />}
@@ -306,7 +369,7 @@ function UploadPage({ onUploaded, onError }) {
   </form></div><aside className="upload-aside panel"><span className="quick-icon">⌑</span><h3>Protected from the start</h3><p>Your file is validated, assigned a unique storage name, and kept in private storage. The original filename is used only as display metadata.</p><div className="upload-step"><b>01</b><span><strong>File validation</strong><small>Format and size are checked.</small></span></div><div className="upload-step"><b>02</b><span><strong>Private storage</strong><small>No permanent public link.</small></span></div><div className="upload-step"><b>03</b><span><strong>Audit event</strong><small>Upload is recorded for review.</small></span></div></aside></div>;
 }
 
-function DocumentDetails({ document, permissions, events, account, onBack, onView, onDownload, onDelete, onUpdate, onError, onPermissions }) {
+function DocumentDetails({ document, permissions, events, account, sessionEpochRef, onBack, onView, onDownload, onDelete, onUpdate, onError, onPermissions }) {
   const [email, setEmail] = useState("");
   const [level, setLevel] = useState("view");
   const [expiration, setExpiration] = useState("");
@@ -363,26 +426,31 @@ function DocumentDetails({ document, permissions, events, account, onBack, onVie
   }
   async function grant(event) {
     event.preventDefault();
+    const requestEpoch = sessionEpochRef.current;
     try {
       await api(`/documents/${document.id}/permissions`, {
         method: "POST",
         body: JSON.stringify({ email, level, expiresAt: expiration ? new Date(expiration).toISOString() : null })
       });
+      if (requestEpoch !== sessionEpochRef.current) return;
       const result = await api(`/documents/${document.id}/permissions`);
+      if (requestEpoch !== sessionEpochRef.current) return;
       onPermissions(result.permissions);
       setEmail("");
       setExpiration("");
     } catch (error) {
-      onError(error.message);
+      if (requestEpoch === sessionEpochRef.current) onError(error.message);
     }
   }
   async function revoke(id) {
     if (!window.confirm("Revoke this person's access?")) return;
+    const requestEpoch = sessionEpochRef.current;
     try {
       await api(`/documents/${document.id}/permissions/${id}`, { method: "DELETE" });
+      if (requestEpoch !== sessionEpochRef.current) return;
       onPermissions(permissions.filter((permission) => permission.id !== id));
     } catch (error) {
-      onError(error.message);
+      if (requestEpoch === sessionEpochRef.current) onError(error.message);
     }
   }
   return <div><button className="back-button" onClick={onBack}>← Back to documents</button><div className="detail-grid"><div className="detail-main"><div className="detail-title"><span className="file-icon large">{document.mimeType === "application/pdf" ? "PDF" : "IMG"}</span><div><span className="eyebrow">DOCUMENT DETAILS</span><h1>{document.name}</h1><p>Uploaded {dateLabel(document.createdAt)}</p></div></div><div className="panel detail-meta"><h3>File information</h3><div><span>Owner</span><strong>{document.owner.name}</strong></div><div><span>Category</span><strong>{document.category || "Other"}</strong></div><div><span>File type</span><strong>{document.mimeType}</strong></div><div><span>File size</span><strong>{sizeLabel(document.size)}</strong></div><div><span>Workspace</span><strong>{account.company.name}</strong></div></div>  <div className="detail-actions"><button className="primary-button" onClick={() => onView(document.id)}>◉ &nbsp; Preview document</button>{document.canDownload && <button className="secondary-button" onClick={() => onDownload(document.id)}>↓ &nbsp; Download</button>}{canManage && !editing && <button className="secondary-button" onClick={startEditing}>✎ &nbsp; Edit details</button>}{canManage && <button className="danger-button" onClick={() => onDelete(document.id)}>Delete document</button>}</div>
