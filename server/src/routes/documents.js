@@ -149,7 +149,8 @@ router.get("/:id", asyncHandler(async (req, res) => {
     mimeType: document.mimeType,
     createdAt: document.createdAt,
     owner: document.owner,
-    canDownload: req.membership.role === "admin" || String(document.owner._id) === String(req.user._id) || permission?.level === "download"
+    canDownload: req.membership.role === "admin" || String(document.owner._id) === String(req.user._id) || permission?.level === "download",
+    canEdit: req.membership.role === "admin" || String(document.owner._id) === String(req.user._id) || permission?.level === "edit"
   } });
 }));
 
@@ -313,14 +314,14 @@ router.delete("/:id/permissions/:permissionId", asyncHandler(async (req, res) =>
 }));
 
 router.patch("/:id", asyncHandler(async (req, res) => {
-  const document = await Document.findOne({ _id: req.params.id, company: req.membership.company._id });
+  const { document, allowed } = await getDocumentAccess(req.params.id, req.membership, req.user._id, "edit");
   if (!document) {
     await recordAudit(req, { action: "document.edit", outcome: "denied", metadata: { documentId: req.params.id, reason: "document_not_found" } });
     throw httpError(404, "Document not found");
   }
-  if (req.membership.role !== "admin" && String(document.owner) !== String(req.user._id)) {
+  if (!allowed) {
     await recordAudit(req, { action: "document.edit", outcome: "denied", document: document._id, metadata: { reason: "role_not_allowed" } });
-    throw httpError(403, "Only the owner or an administrator can edit this document");
+    throw httpError(403, "Only the owner, an administrator, or a user with edit access can edit this document");
   }
   const input = documentUpdateSchema.parse(req.body);
   if (!input.name && !input.category) throw httpError(400, "Provide a document name or category");

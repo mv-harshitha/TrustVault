@@ -21,7 +21,7 @@ export const loginSchema = z.object({
 
 export const permissionSchema = z.object({
   email: z.string().trim().email().max(254),
-  level: z.enum(["view", "download"]),
+  level: z.enum(["view", "download", "edit"]),
   expiresAt: z.string().datetime().optional().nullable()
 });
 

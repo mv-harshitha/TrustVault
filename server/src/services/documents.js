@@ -19,7 +19,11 @@ export async function getDocumentAccess(documentId, membership, userId, level = 
     revokedAt: null,
     $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
   });
-  const allowed = permission && (level === "view" || permission.level === "download");
+  const allowed = permission && (
+    level === "view"
+    || (level === "download" && permission.level === "download")
+    || (level === "edit" && permission.level === "edit")
+  );
   if (!permission) {
     const expiredPermission = await Permission.exists({
       document: document._id,

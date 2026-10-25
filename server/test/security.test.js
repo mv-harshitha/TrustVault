@@ -57,7 +57,8 @@ async function register(agent, email, companyName) {
 
 function createAgent() {
   const agent = request.agent(app);
-  agent.set("X-Forwarded-For", `192.0.2.${nextTestClientAddress++}`);
+  agent.set("X-Forwarded-For", `192.0.2.${nextTestClientAddress++}`)
+    .set("Origin", process.env.CLIENT_ORIGIN);
   return agent;
 }
 
@@ -168,6 +169,15 @@ test("CORS preflight and registration request errors return readable responses",
   assert.equal(malformed.status, 400);
   assert.equal(malformed.headers["access-control-allow-origin"], "http://localhost:5173");
 
+  const missingOrigin = await request(app).post("/api/auth/register").send({
+    name: "Missing Origin",
+    email: "missing-origin@example.test",
+    password: "Strong-password-123",
+    companyName: "Missing Origin Workspace"
+  });
+  assert.equal(missingOrigin.status, 403);
+  assert.equal(await User.exists({ email: "missing-origin@example.test" }), null);
+
   const usersBeforeUntrustedRequest = await User.countDocuments();
   const untrusted = await request(app).post("/api/auth/register")
     .set("Origin", "https://attacker.example")
@@ -186,17 +196,20 @@ test("registers and logs in; rejects invalid credentials", async () => {
   assert.match(response.headers["set-cookie"][0], /HttpOnly/);
   assert.equal(response.body.passwordHash, undefined);
   assert.equal((await agent.get("/api/auth/me")).body.user.email, "admin@example.test");
-  const invalid = await request(app).post("/api/auth/login").send({
-    email: "admin@example.test",
-    password: "incorrect"
-  });
+  const invalid = await request(app).post("/api/auth/login")
+    .set("Origin", process.env.CLIENT_ORIGIN)
+    .send({
+      email: "admin@example.test",
+      password: "incorrect"
+    });
   assert.equal(invalid.status, 401);
   assert.ok(await AuditEvent.exists({ action: "auth.login", outcome: "failure" }));
 });
 
 test("protects routes without a session and revokes a session at logout", async () => {
   const noSession = (method, path) => request(app)[method](path)
-    .set("X-Forwarded-For", `198.51.100.${nextTestClientAddress++}`);
+    .set("X-Forwarded-For", `198.51.100.${nextTestClientAddress++}`)
+    .set("Origin", process.env.CLIENT_ORIGIN);
   assert.equal((await noSession("get", "/api/documents")).status, 401);
   const uploaded = await adminAgent.post("/api/documents").attach("file", png, { filename: "auth-matrix.png", contentType: "image/png" });
   const id = uploaded.body.document.id;
@@ -462,6 +475,51 @@ test("owner, administrator, and viewer roles are enforced on direct document API
   const visibleToAdmin = await adminAgent.get("/api/documents");
   assert.equal(visibleToAdmin.status, 200);
   assert.equal(visibleToAdmin.body.documents.length, 2);
+});
+
+test("edit grants allow metadata editing without download, deletion, or permission management", async () => {
+  const uploaded = await adminAgent.post("/api/documents")
+    .attach("file", png, { filename: "editable.png", contentType: "image/png" });
+  assert.equal(uploaded.status, 201);
+  const id = uploaded.body.document.id;
+  const editor = await inviteMember(adminAgent, "metadata-editor@example.test", "viewer");
+  const editorUser = await User.findOne({ email: "metadata-editor@example.test" });
+
+  assert.equal((await editor.patch(`/api/documents/${id}`).send({ name: "before-grant.png" })).status, 403);
+  const grant = await adminAgent.post(`/api/documents/${id}/permissions`)
+    .send({ email: "metadata-editor@example.test", level: "edit" });
+  assert.equal(grant.status, 201);
+  assert.equal(grant.body.permission.level, "edit");
+
+  const details = await editor.get(`/api/documents/${id}`);
+  assert.equal(details.status, 200);
+  assert.equal(details.body.document.canEdit, true);
+  assert.equal(details.body.document.canDownload, false);
+  assert.equal((await editor.get(`/api/documents/${id}/view`)).status, 200);
+  assert.equal((await editor.get(`/api/documents/${id}/download`)).status, 403);
+  const edited = await editor.patch(`/api/documents/${id}`).send({ name: "edited-by-viewer.png", category: "Legal" });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.document.name, "edited-by-viewer.png");
+  assert.equal(edited.body.document.category, "Legal");
+
+  // Edit capability is scoped to metadata and does not change the user's role.
+  assert.equal((await editor.delete(`/api/documents/${id}`)).status, 403);
+  assert.equal((await editor.get(`/api/documents/${id}/permissions`)).status, 403);
+  assert.equal((await editor.post(`/api/documents/${id}/permissions`).send({ email: "outsider@example.test", level: "view" })).status, 403);
+  assert.equal((await editor.delete(`/api/documents/${id}/permissions/${grant.body.permission.id}`)).status, 403);
+  assert.equal((await editor.post("/api/workspaces/current/invitations").send({ email: "forged-role@example.test", role: "owner" })).status, 403);
+  assert.equal((await Membership.findOne({ user: editorUser._id })).role, "viewer");
+
+  // A member from another workspace cannot edit by supplying a forged role.
+  assert.equal((await viewerAgent.patch(`/api/documents/${id}`).send({ name: "cross-workspace.png", role: "admin" })).status, 404);
+  assert.equal((await Document.findById(id)).name, "edited-by-viewer.png");
+
+  assert.equal((await adminAgent.delete(`/api/documents/${id}/permissions/${grant.body.permission.id}`)).status, 204);
+  assert.equal((await editor.get(`/api/documents/${id}`)).status, 403);
+  assert.equal((await editor.get(`/api/documents/${id}/view`)).status, 403);
+  assert.equal((await editor.patch(`/api/documents/${id}`).send({ name: "after-revocation.png" })).status, 403);
+  assert.equal((await Document.findById(id)).name, "edited-by-viewer.png");
+  assert.ok(await AuditEvent.exists({ action: "document.edit", outcome: "denied", actor: editorUser._id, document: id }));
 });
 
 test("records successful and denied access events and limits audit visibility", async () => {
