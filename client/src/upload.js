@@ -7,13 +7,17 @@ const allowedTypes = new Map([
   [".jpeg", "image/jpeg"]
 ]);
 
+export function getUploadMimeType(file) {
+  const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+  return allowedTypes.get(extension) || "";
+}
+
 export function validateUploadFile(file) {
   if (!file) return "Choose a file to upload.";
   if (file.size > MAX_UPLOAD_SIZE) return "File exceeds the 10 MB limit.";
 
-  const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-  const expectedType = allowedTypes.get(extension);
-  if (!expectedType || file.type !== expectedType) {
+  const expectedType = getUploadMimeType(file);
+  if (!expectedType || (file.type && file.type !== expectedType)) {
     return "Choose a verified PDF, PNG, or JPEG file.";
   }
 

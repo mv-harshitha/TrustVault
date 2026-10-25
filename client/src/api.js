@@ -1,3 +1,5 @@
+import { getUploadMimeType } from "./upload.js";
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
 function readResponseBody(responseText) {
@@ -35,7 +37,9 @@ export async function api(path, options = {}) {
 
 export function uploadDocument(file, category, onProgress = () => {}) {
   const data = new FormData();
-  data.append("file", file);
+  const mimeType = getUploadMimeType(file);
+  const uploadFile = file.type ? file : new Blob([file], { type: mimeType });
+  data.append("file", uploadFile, file.name);
   data.append("category", category);
 
   return new Promise((resolve, reject) => {

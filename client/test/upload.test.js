@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { MAX_UPLOAD_SIZE, validateUploadFile } from "../src/upload.js";
+import { getUploadMimeType, MAX_UPLOAD_SIZE, validateUploadFile } from "../src/upload.js";
 
 function file(name, type, size = 100) {
   return { name, type, size };
@@ -30,6 +30,7 @@ test("upload picker exposes a keyboard-accessible Browse button with one click p
 
 test("file selection, validation, drop, and upload state remain connected", async () => {
   const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const api = await readFile(new URL("../src/api.js", import.meta.url), "utf8");
   const uploadPage = app.slice(app.indexOf("function UploadPage"), app.indexOf("function DocumentDetails"));
 
   assert.match(uploadPage, /event\.target\.files\[0\] \|\| null/);
@@ -40,6 +41,8 @@ test("file selection, validation, drop, and upload state remain connected", asyn
   assert.match(uploadPage, /disabled=\{!file \|\| Boolean\(validateUploadFile\(file\)\) \|\| busy\}/);
   assert.doesNotMatch(uploadPage, /onCancel=/);
   assert.match(uploadPage, /event\.target\.closest\("button"\)/);
+  assert.match(api, /new Blob\(\[file\], \{ type: mimeType \}\)/);
+  assert.match(api, /data\.append\("file", uploadFile, file\.name\)/);
 });
 
 test("accepts supported PDF, PNG, and JPEG files within the size limit", () => {
@@ -54,6 +57,18 @@ test("rejects unsupported extensions and mismatched MIME types", () => {
   assert.equal(validateUploadFile(file("notes.txt", "text/plain")), "Choose a verified PDF, PNG, or JPEG file.");
   assert.equal(validateUploadFile(file("report.pdf", "text/plain")), "Choose a verified PDF, PNG, or JPEG file.");
   assert.equal(validateUploadFile(file("image.png", "image/jpeg")), "Choose a verified PDF, PNG, or JPEG file.");
+});
+
+test("accepts supported files when the browser omits MIME and resolves the upload type by extension", () => {
+  assert.equal(validateUploadFile(file("report.pdf", "")), "");
+  assert.equal(validateUploadFile(file("image.png", "")), "");
+  assert.equal(validateUploadFile(file("image.jpg", "")), "");
+  assert.equal(validateUploadFile(file("image.jpeg", "")), "");
+  assert.equal(getUploadMimeType(file("report.pdf", "")), "application/pdf");
+  assert.equal(getUploadMimeType(file("image.png", "")), "image/png");
+  assert.equal(getUploadMimeType(file("image.jpg", "")), "image/jpeg");
+  assert.equal(getUploadMimeType(file("image.jpeg", "")), "image/jpeg");
+  assert.equal(getUploadMimeType(file("notes.txt", "")), "");
 });
 
 test("rejects missing files and files larger than 10 MB", () => {
