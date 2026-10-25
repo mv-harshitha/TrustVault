@@ -353,12 +353,19 @@ function UploadPage({ onUploaded, onError }) {
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState("");
   const [progress, setProgress] = useState(null);
+  const fileInputRef = useRef(null);
 
   function selectFile(candidate, input) {
     const validationError = validateUploadFile(candidate);
     setFileError(validationError);
     setFile(validationError ? null : candidate);
     if (input) input.value = "";
+  }
+
+  function openFilePicker(event) {
+    if (busy) return;
+    if (event.target.closest("button")) return;
+    fileInputRef.current?.click();
   }
 
   async function submit(event) {
@@ -385,18 +392,12 @@ function UploadPage({ onUploaded, onError }) {
   }
   return <div className="upload-layout"><div><div className="page-heading"><span className="eyebrow">ADD TO YOUR LIBRARY</span><h1>Upload a document</h1><p>Files are stored privately and checked before upload.</p></div><form onSubmit={submit} className="upload-form">
     <label className="upload-category">Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{documentCategories.map((value) => <option key={value}>{value}</option>)}</select></label>
-    <input
-      id="document-file-picker"
-      className="file-input"
-      type="file"
-      accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-      disabled={busy}
-      onChange={(event) => selectFile(event.target.files[0] || null, event.target)}
-    />
-    <label
-      htmlFor="document-file-picker"
+    <div
       className={`drop-zone ${dragging ? "dragging" : ""}`}
+      role="group"
+      aria-label="Upload document file"
       aria-disabled={busy}
+      onClick={openFilePicker}
       onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
       onDrop={(event) => {
@@ -405,10 +406,22 @@ function UploadPage({ onUploaded, onError }) {
         if (!busy) selectFile(event.dataTransfer.files[0] || null);
       }}
     >
+      <input
+        ref={fileInputRef}
+        className="file-input"
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+        tabIndex={-1}
+        disabled={busy}
+        onChange={(event) => selectFile(event.target.files[0] || null, event.target)}
+      />
       <span className="upload-icon">↑</span>
       <strong>{file ? file.name : "Drop your file here, or browse"}</strong>
       <small>{file ? `${sizeLabel(file.size)} · ${file.type}` : "PDF, PNG or JPEG · Maximum size 10 MB"}</small>
-    </label>
+      <button className="browse-button" type="button" disabled={busy} onClick={(event) => { event.stopPropagation(); fileInputRef.current?.click(); }}>
+        Browse files
+      </button>
+    </div>
     {fileError && <p className="upload-error" role="alert">{fileError}</p>}
     {progress !== null && <div className="upload-progress" role="status" aria-live="polite">
       {progress < 100 ? `Uploading securely · ${progress}%` : "Upload sent; waiting for private storage and audit confirmation..."}

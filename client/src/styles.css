@@ -144,9 +144,11 @@ tr:last-child td { border-bottom: 0; }
 .upload-form { background: white; border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
 .drop-zone { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 190px; border: 1px dashed #cbd6e4; background: #fbfcfe; border-radius: 7px; cursor: pointer; transition: .15s; text-align: center; padding: 18px; }
 .drop-zone:hover, .drop-zone.dragging { border-color: #6c8ce1; background: #f4f7ff; }
-.file-input:focus-visible + .drop-zone { outline: 2px solid #6c8ce1; outline-offset: 3px; }
+.drop-zone:focus-visible { outline: 2px solid #6c8ce1; outline-offset: 3px; }
 .drop-zone[aria-disabled="true"] { cursor: wait; opacity: .7; }
 .file-input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+.browse-button { margin-top: 12px; border: 1px solid #dce3ec; border-radius: 6px; background: #fff; color: #53647b; padding: 8px 12px; font-size: 10px; font-weight: 600; }
+.browse-button:hover:not(:disabled), .browse-button:focus-visible { border-color: #aebcda; background: #f8faff; }
 .upload-icon { width: 39px; height: 39px; border-radius: 50%; background: #edf2ff; color: #5273ca; display: grid; place-items: center; font-size: 21px; margin-bottom: 12px; }
 .drop-zone strong { font-size: 11px; }
 .drop-zone small { color: #97a2b0; margin-top: 7px; font-size: 9px; }

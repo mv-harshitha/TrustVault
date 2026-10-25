@@ -7,19 +7,24 @@ function file(name, type, size = 100) {
   return { name, type, size };
 }
 
-test("upload picker uses a native label association and remains keyboard reachable", async () => {
+test("upload picker exposes a keyboard-accessible Browse button with one click path", async () => {
   const app = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
-  const input = app.match(/<input\s+id="document-file-picker"([\s\S]*?)\/>/);
-  const label = app.match(/<label\s+htmlFor="document-file-picker"([\s\S]*?)<\/label>/);
+  const uploadPage = app.slice(app.indexOf("function UploadPage"), app.indexOf("function DocumentDetails"));
+  const input = uploadPage.match(/<input\s+ref=\{fileInputRef\}([\s\S]*?)\/>/);
+  const browseButton = uploadPage.match(/<button className="browse-button"([\s\S]*?)<\/button>/);
 
   assert.ok(input, "file input should be present");
-  assert.ok(label, "upload drop zone should be an associated label");
+  assert.ok(browseButton, "an explicit Browse files button should be present");
   assert.match(input[1], /type="file"/);
-  assert.doesNotMatch(input[1], /tabIndex=\{-1\}/);
+  assert.match(input[1], /tabIndex=\{-1\}/);
   assert.match(input[1], /onChange=/);
-  assert.match(label[1], /onDrop=/);
-  assert.doesNotMatch(label[1], /onClick=|onKeyDown=/);
-  assert.doesNotMatch(app, /fileInputRef\.current\?\.click\(\)/);
+  assert.match(browseButton[1], /type="button"/);
+  assert.match(browseButton[1], /event\.stopPropagation\(\)/);
+  assert.match(browseButton[1], /fileInputRef\.current\?\.click\(\)/);
+  assert.match(uploadPage, /onClick=\{openFilePicker\}/);
+  assert.match(uploadPage, /fileInputRef\.current\?\.click\(\)/);
+  assert.doesNotMatch(uploadPage, /onKeyDown=/);
+  assert.match(browseButton[1], /disabled=\{busy\}/);
   assert.match(input[1], /accept="\.pdf,\.png,\.jpg,\.jpeg,application\/pdf,image\/png,image\/jpeg"/);
 });
 
@@ -34,6 +39,7 @@ test("file selection, validation, drop, and upload state remain connected", asyn
   assert.match(uploadPage, /selectFile\(event\.dataTransfer\.files\[0\] \|\| null\)/);
   assert.match(uploadPage, /disabled=\{!file \|\| Boolean\(validateUploadFile\(file\)\) \|\| busy\}/);
   assert.doesNotMatch(uploadPage, /onCancel=/);
+  assert.match(uploadPage, /event\.target\.closest\("button"\)/);
 });
 
 test("accepts supported PDF, PNG, and JPEG files within the size limit", () => {
