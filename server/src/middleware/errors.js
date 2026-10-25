@@ -16,7 +16,7 @@ export async function errorHandler(error, req, res, _next) {
       console.error(`[${req.id}] Failed to record multipart upload failure:`, auditError);
       return res.status(500).json({ error: "Unable to record upload failure" });
     }
-    const message = error.code === "LIMIT_FILE_SIZE" ? "File exceeds the 10 MB limit" : "Invalid multipart upload";
+    const message = error.code === "LIMIT_FILE_SIZE" ? "File exceeds the 40 MB limit" : "Invalid multipart upload";
     return res.status(400).json({ error: message });
   }
   if (error?.name === "ZodError") {

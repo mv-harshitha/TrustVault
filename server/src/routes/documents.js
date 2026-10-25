@@ -15,7 +15,8 @@ import { recordAudit } from "../services/audit.js";
 import { documentCategorySchema, documentSearchSchema, documentUpdateSchema, permissionSchema } from "../validators/index.js";
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+const MAX_UPLOAD_SIZE = 40 * 1024 * 1024;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_SIZE, files: 1 } });
 const allowedTypes = new Set(["application/pdf", "image/png", "image/jpeg"]);
 const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

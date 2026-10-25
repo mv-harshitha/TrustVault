@@ -1,4 +1,4 @@
-export const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
+export const MAX_UPLOAD_SIZE = 40 * 1024 * 1024;
 
 const allowedTypes = new Map([
   [".pdf", "application/pdf"],
@@ -14,7 +14,7 @@ export function getUploadMimeType(file) {
 
 export function validateUploadFile(file) {
   if (!file) return "Choose a file to upload.";
-  if (file.size > MAX_UPLOAD_SIZE) return "File exceeds the 10 MB limit.";
+  if (file.size > MAX_UPLOAD_SIZE) return "File exceeds the 40 MB limit.";
 
   const expectedType = getUploadMimeType(file);
   if (!expectedType || (file.type && file.type !== expectedType)) {

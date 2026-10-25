@@ -60,7 +60,7 @@ test("pasting only accepts clipboard file data and never file path text", async 
   assert.doesNotMatch(uploadPage, /clipboardData\.getData|file\.path|webkitRelativePath/);
 });
 
-test("accepts supported PDF, PNG, and JPEG files within the 10 MB limit", () => {
+test("accepts supported PDF, PNG, and JPEG files within the 40 MB limit", () => {
   assert.equal(validateUploadFile(file("report.pdf", "application/pdf")), "");
   assert.equal(validateUploadFile(file("image.png", "image/png")), "");
   assert.equal(validateUploadFile(file("image.jpg", "image/jpeg")), "");
@@ -72,7 +72,7 @@ test("rejects unsupported extensions, mismatched MIME types, and oversized files
   assert.equal(validateUploadFile(file("notes.txt", "text/plain")), "Choose a verified PDF, PNG, or JPEG file.");
   assert.equal(validateUploadFile(file("report.pdf", "text/plain")), "Choose a verified PDF, PNG, or JPEG file.");
   assert.equal(validateUploadFile(file("image.png", "image/jpeg")), "Choose a verified PDF, PNG, or JPEG file.");
-  assert.equal(validateUploadFile(file("too-large.pdf", "application/pdf", MAX_UPLOAD_SIZE + 1)), "File exceeds the 10 MB limit.");
+  assert.equal(validateUploadFile(file("too-large.pdf", "application/pdf", MAX_UPLOAD_SIZE + 1)), "File exceeds the 40 MB limit.");
 });
 
 test("accepts supported files when the browser omits MIME and resolves upload MIME by extension", () => {

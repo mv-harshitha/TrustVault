@@ -13,7 +13,7 @@ TrustVault is a full-stack MVP for private company workspaces, explicitly shared
 - Company workspaces with `admin`, `owner`, and `viewer` memberships. Admins can invite and remove members in their own workspace.
 - Registration creates a new company and its first admin. Admins can invite owners and viewers using a single-use, 48-hour invitation code.
 - Password hashing with bcrypt, an eight-hour JWT in an HttpOnly cookie, logout invalidation, trusted-origin checks, and rate limits on login, registration, invitation, upload, and member-invitation routes.
-- Private Supabase Storage uploads with server-generated object names. The server checks file signatures and accepts PDF, PNG, and JPEG up to 10 MB.
+- Private Supabase Storage uploads with server-generated object names. The server checks file signatures and accepts PDF, PNG, and JPEG up to 40 MB.
 - The API checks that the configured Supabase bucket exists and is private before file operations; downloads remain server-mediated and are authorized on each request.
 - Company-scoped document metadata, explicit view/download/edit grants, expiration, revocation, owner/admin management, and authorization on each request. An edit grant permits metadata edits and preview only, not downloads, deletion, or permission management.
 - Downloads are served through the authenticated backend rather than returning a storage URL, so a revoked grant is checked on the next download request.
@@ -191,7 +191,7 @@ Audit writes are awaited and failures are returned as errors rather than silentl
 - User accounts are limited to one workspace in the current interface and API.
 - Only PDF, PNG, and JPEG are accepted. Signature validation is not malware scanning.
 - Document search is server-side by name, workspace member owner name/email, category, and inclusive UTC upload-date range. The filtered list is capped at 200 results; pagination, audit export, and password-reset/email-verification workflows are not implemented.
-- A short-lived signed URL is not used: downloads are proxied through the API to permit an authorization check on every request. This uses server bandwidth and buffers files up to the configured 10 MB limit.
+- A short-lived signed URL is not used: downloads are proxied through the API to permit an authorization check on every request. This uses server bandwidth and buffers files up to the configured 40 MB limit.
 - During implementation, the workspace router was initially mounted at a path that duplicated `/current`; the mount was corrected to `/api/workspaces` so the defined `/current` endpoints compose correctly. The session cookie was also updated to include an authentication version so logout invalidates the token server-side.
 - Before submission, run the documented tests and build, fix any failures, and demonstrate the production flows with safe test identities and synthetic files. Do not claim flows were verified unless they were exercised.
 

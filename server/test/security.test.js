@@ -21,6 +21,7 @@ let documentId;
 let nextTestClientAddress = 1;
 let storageIsPrivate = true;
 
+const MAX_UPLOAD_SIZE = 40 * 1024 * 1024;
 const png = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
   0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -332,9 +333,15 @@ test("uploads verified files, checks MIME and size, and serves downloads after a
   const invalidCategory = await adminAgent.post("/api/documents").field("category", "Payroll")
     .attach("file", png, { filename: "invalid-category.png", contentType: "image/png" });
   assert.equal(invalidCategory.status, 400);
+  const maxSizePng = Buffer.alloc(MAX_UPLOAD_SIZE);
+  png.copy(maxSizePng);
+  const acceptedMaximum = await adminAgent.post("/api/documents")
+    .attach("file", maxSizePng, { filename: "maximum-size.png", contentType: "image/png" });
+  assert.equal(acceptedMaximum.status, 201);
   const oversized = await adminAgent.post("/api/documents")
-    .attach("file", Buffer.alloc(10 * 1024 * 1024 + 1, 1), { filename: "large.png", contentType: "image/png" });
+    .attach("file", Buffer.alloc(MAX_UPLOAD_SIZE + 1, 1), { filename: "large.png", contentType: "image/png" });
   assert.equal(oversized.status, 400);
+  assert.equal(oversized.body.error, "File exceeds the 40 MB limit");
   const downloaded = await adminAgent.get(`/api/documents/${documentId}/download`);
   assert.equal(downloaded.status, 200);
   assert.match(downloaded.headers["content-disposition"], /report.png/);

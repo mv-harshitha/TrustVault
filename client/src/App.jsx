@@ -419,7 +419,7 @@ function UploadPage({ onUploaded, onError }) {
         <span className="drop-zone-icon" aria-hidden="true">↓</span>
         <span className="drop-zone-title">Add a document to your workspace</span>
         <strong className="drop-zone-instructions" id="upload-drop-instructions">Drag your document from File Explorer and drop it here.</strong>
-        <span className="drop-zone-hint">PDF, PNG, JPG, or JPEG · Maximum size 10 MB</span>
+        <span className="drop-zone-hint">PDF, PNG, JPG, or JPEG · Maximum size 40 MB</span>
       </>}
       <span className="paste-instructions" id="upload-paste-instructions">Or focus this area and press Ctrl+V to paste a copied file.</span>
     </div>
