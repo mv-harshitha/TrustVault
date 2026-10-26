@@ -31,6 +31,7 @@ export default function App() {
   const sessionObserverRef = useRef(null);
   const sessionEpochRef = useRef(0);
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [filters, setFilters] = useState({ name: "", owner: "", category: "", dateFrom: "", dateTo: "" });
@@ -269,10 +270,11 @@ function pageTitle(page, selected) {
   return ({ overview: "Overview", documents: "My documents", shared: "Shared with me", upload: "Upload document", audit: "Audit trail", members: "Workspace members" })[page] || "Overview";
 }
 
-function AuthScreen({ onSuccess }) {
+export function AuthScreen({ onSuccess }) {
   const [mode, setMode] = useState("login");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function submit(event) {
     event.preventDefault();
@@ -346,17 +348,19 @@ function DocumentTable({ documents, busy, onOpen, onDownload }) {
   </tr>)}</tbody></table></div>;
 }
 
-function UploadPage({ onUploaded, onError }) {
+export function UploadPage({ onUploaded, onError }) {
   const [file, setFile] = useState(null);
   const [category, setCategory] = useState("Other");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState("");
   const [progress, setProgress] = useState(null);
-  function selectFile(candidate) {
+  function selectFile(candidate, input) {
     const validationError = validateUploadFile(candidate);
     setFileError(validationError);
     setFile(validationError ? null : candidate);
+    if (input) input.value = "";
   }
 
   function handlePaste(event) {
@@ -422,6 +426,21 @@ function UploadPage({ onUploaded, onError }) {
         <span className="drop-zone-hint">PDF, PNG, JPG, or JPEG · Maximum size 40 MB</span>
       </>}
       <span className="paste-instructions" id="upload-paste-instructions">Or focus this area and press Ctrl+V to paste a copied file.</span>
+      <div className="browse-file-control">
+        <span className="browse-file-label" id="browse-file-label">Browse Files</span>
+        <input
+          className="browse-file-input"
+          type="file"
+          accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+          aria-label="Browse Files"
+          aria-describedby="browse-file-label"
+          disabled={busy}
+          onChange={(event) => {
+            const candidate = event.target.files[0];
+            if (candidate) selectFile(candidate, event.target);
+          }}
+        />
+      </div>
     </div>
     {fileError && <p className="upload-error" role="alert">{fileError}</p>}
     {progress !== null && <div className="upload-progress" role="status" aria-live="polite">
