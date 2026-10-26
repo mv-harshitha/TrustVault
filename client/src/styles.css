@@ -16,11 +16,8 @@
 * { box-sizing: border-box; }
 html {
   direction: rtl;
-  overflow-x: hidden;
-  scroll-behavior: smooth;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: #c2c9d8 #f1f3f9;
+  height: 100%;
+  overflow: hidden;
 }
 
 ::-webkit-scrollbar {
@@ -41,11 +38,23 @@ html {
 
 body {
   direction: ltr;
+  height: 100%;
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
-  overflow-x: hidden;
+  overflow: hidden;
 }
+#root {
+  direction: rtl;
+  width: 100%;
+  height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #c2c9d8 #f1f3f9;
+  scroll-behavior: smooth;
+}
+#root > * { direction: ltr; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .62; }
@@ -640,7 +649,7 @@ label { gap: 7px; color: #4d5870; font-size: 11px; }
 .boot-screen .brand-mark { color: #fff; }
 
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
+  #root { scroll-behavior: auto; }
 }
 
 @media (max-width: 1050px) {

@@ -22,10 +22,16 @@ test("page scrollbar is on the left while page content stays left-to-right", asy
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const htmlRule = css.match(/html\s*\{([^}]*)\}/)?.[1] ?? "";
   const bodyRule = css.match(/body\s*\{([^}]*)\}/)?.[1] ?? "";
+  const rootRule = css.match(/#root\s*\{([^}]*)\}/)?.[1] ?? "";
 
   assert.match(htmlRule, /direction:\s*rtl/);
+  assert.match(htmlRule, /overflow:\s*hidden/);
   assert.match(bodyRule, /direction:\s*ltr/);
-  assert.match(htmlRule, /overflow-x:\s*hidden/);
-  assert.match(htmlRule, /scroll-behavior:\s*smooth/);
-  assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*html\s*\{\s*scroll-behavior:\s*auto/);
+  assert.match(bodyRule, /overflow:\s*hidden/);
+  assert.match(rootRule, /direction:\s*rtl/);
+  assert.match(rootRule, /overflow-y:\s*auto/);
+  assert.match(rootRule, /scrollbar-gutter:\s*stable/);
+  assert.match(rootRule, /scroll-behavior:\s*smooth/);
+  assert.match(css, /#root\s*>\s*\*\s*\{\s*direction:\s*ltr/);
+  assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*#root\s*\{\s*scroll-behavior:\s*auto/);
 });
