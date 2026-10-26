@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, downloadFile, getDocumentFile, uploadDocument } from "./api.js";
 import { sessionChanged, watchSession } from "./session.js";
-import { validateUploadFile } from "./upload.js";
+import { getUploadMimeType, validateUploadFile } from "./upload.js";
 
 const navItems = [
   ["overview", "Overview", "◫"],
@@ -386,12 +386,28 @@ export function UploadPage({ onUploaded, onError }) {
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState("");
   const [progress, setProgress] = useState(null);
-  function selectFile(candidate, input) {
+  const fileInputRef = useRef(null);
+  const uploadInProgressRef = useRef(false);
+
+  const selectFile = useCallback((candidate, input) => {
     const validationError = validateUploadFile(candidate);
     setFileError(validationError);
     setFile(validationError ? null : candidate);
     if (input) input.value = "";
-  }
+  }, []);
+
+  const handleNativeFileChange = useCallback((event) => {
+    const input = event.currentTarget;
+    const candidate = input.files[0];
+    if (candidate) selectFile(candidate, input);
+  }, [selectFile]);
+
+  const attachFileInput = useCallback((input) => {
+    const previousInput = fileInputRef.current;
+    if (previousInput) previousInput.removeEventListener("change", handleNativeFileChange, true);
+    fileInputRef.current = input;
+    if (input) input.addEventListener("change", handleNativeFileChange, true);
+  }, [handleNativeFileChange]);
 
   function handlePaste(event) {
     if (busy) return;
@@ -403,11 +419,13 @@ export function UploadPage({ onUploaded, onError }) {
 
   async function submit(event) {
     event.preventDefault();
+    if (uploadInProgressRef.current) return;
     const validationError = validateUploadFile(file);
     if (validationError) {
       setFileError(validationError);
       return;
     }
+    uploadInProgressRef.current = true;
     setBusy(true);
     setProgress(0);
     setFileError("");
@@ -421,6 +439,7 @@ export function UploadPage({ onUploaded, onError }) {
       setProgress(null);
       onError(`Upload failed: ${error.message}`);
     } finally {
+      uploadInProgressRef.current = false;
       setBusy(false);
     }
   }
@@ -445,9 +464,10 @@ export function UploadPage({ onUploaded, onError }) {
     >
       {file ? <>
         <span className="drop-zone-icon selected" aria-hidden="true">✓</span>
-        <span className="drop-zone-title">Document ready</span>
+        <span className="drop-zone-title">Document ready to upload</span>
         <strong className="selected-file-name">{file.name}</strong>
         <span className="selected-file-size">{sizeLabel(file.size)}</span>
+        <span className="selected-file-type">{file.type || getUploadMimeType(file)}</span>
         <span className="drop-zone-hint" id="upload-drop-instructions">Drop another document to replace this file.</span>
       </> : <>
         <span className="drop-zone-icon" aria-hidden="true">↓</span>
@@ -460,15 +480,12 @@ export function UploadPage({ onUploaded, onError }) {
         <span className="browse-file-label" id="browse-file-label">Browse Files</span>
         <input
           className="browse-file-input"
+          ref={attachFileInput}
           type="file"
           accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
           aria-label="Browse Files"
           aria-describedby="browse-file-label"
           disabled={busy}
-          onChange={(event) => {
-            const candidate = event.target.files[0];
-            if (candidate) selectFile(candidate, event.target);
-          }}
         />
       </div>
     </div>

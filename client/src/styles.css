@@ -15,9 +15,10 @@
 
 * { box-sizing: border-box; }
 html {
-  direction: rtl;
-  height: 100%;
-  overflow: hidden;
+  direction: ltr;
+  min-height: 100%;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
 }
 
 ::-webkit-scrollbar {
@@ -38,30 +39,28 @@ html {
 
 body {
   direction: ltr;
-  height: 100%;
   margin: 0;
   min-width: 320px;
-  overflow: hidden;
+  min-height: 100vh;
+  overflow-x: hidden;
 }
 #root {
-  direction: rtl;
+  direction: ltr;
   width: 100%;
-  height: 100vh;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: #c2c9d8 #f1f3f9;
-  scroll-behavior: smooth;
+  min-height: 100vh;
 }
-#root > * { direction: ltr; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .62; }
 a { color: inherit; text-decoration: none; }
 
 .app-shell { min-height: 100vh; }
-.sidebar { width: 256px; background: var(--navy); color: #edf2fa; position: fixed; inset: 0 auto 0 0; display: flex; flex-direction: column; padding: 28px 16px 16px; z-index: 2; }
+.sidebar { width: 256px; background: var(--navy); color: #edf2fa; position: fixed; inset: 0 auto 0 0; display: flex; flex-direction: column; padding: 28px 16px 16px; z-index: 2; height: 100vh; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #7188c5 #182437; }
+.sidebar > * { flex-shrink: 0; }
+.sidebar::-webkit-scrollbar { width: 8px; }
+.sidebar::-webkit-scrollbar-track { background: #182437; }
+.sidebar::-webkit-scrollbar-thumb { background: #7188c5; border: 2px solid #182437; border-radius: 99px; }
+.sidebar::-webkit-scrollbar-thumb:hover { background: #9aaddd; }
 .brand { display: flex; align-items: center; gap: 11px; padding: 0 9px; font: 800 19px "Segoe UI", Arial, sans-serif; letter-spacing: -.7px; }
 .brand-mark { width: 34px; height: 34px; border-radius: 11px; color: white; background: #527bea; display: inline-grid; place-items: center; font: 800 18px "Segoe UI", Arial, sans-serif; box-shadow: 0 5px 14px #3968d733; flex: 0 0 auto; }
 .brand small { display: block; color: #7c899d; font: 600 8px "Segoe UI", Arial, sans-serif; letter-spacing: 1.5px; margin-top: 2px; }
@@ -534,6 +533,7 @@ input:focus, select:focus { border-color: #8290ee; box-shadow: 0 0 0 3px #5268e8
 .drop-zone-hint, .paste-instructions { color: #68738b; font-size: 11px; }
 .selected-file-name { color: #263149; font-size: 13px; }
 .selected-file-size { color: #258363; font-size: 11px; }
+.selected-file-type { color: #68738b; font-size: 10px; }
 .browse-file-control { width: min(100%, 390px); display: grid; justify-items: center; gap: 8px; margin-top: 6px; padding-top: 14px; border-top: 1px solid #e6e8f3; }
 .browse-file-label { color: #56617b; font-size: 10px; font-weight: 600; }
 .browse-file-input { width: 100%; min-height: 42px; padding: 4px; border: 1px solid #dce1f0; border-radius: 10px; background: #fff; color: #5c6780; font-size: 10px; cursor: pointer; }
@@ -649,7 +649,7 @@ label { gap: 7px; color: #4d5870; font-size: 11px; }
 .boot-screen .brand-mark { color: #fff; }
 
 @media (prefers-reduced-motion: reduce) {
-  #root { scroll-behavior: auto; }
+  html { scroll-behavior: auto; }
 }
 
 @media (max-width: 1050px) {
@@ -664,6 +664,8 @@ label { gap: 7px; color: #4d5870; font-size: 11px; }
     inset: auto;
     z-index: 2;
     width: 100%;
+    height: auto;
+    overflow: visible;
     padding: 14px 18px 10px;
     display: grid;
     grid-template-columns: minmax(130px, 1fr) auto;

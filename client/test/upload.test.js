@@ -24,8 +24,12 @@ test("upload page presents a keyboard-focusable drop target and visible native f
   assert.match(picker[1], /type="file"/);
   assert.match(picker[1], /aria-label="Browse Files"/);
   assert.match(picker[1], /accept="\.pdf,\.png,\.jpg,\.jpeg,application\/pdf,image\/png,image\/jpeg"/);
+  assert.match(picker[1], /ref=\{attachFileInput\}/);
   assert.match(picker[1], /disabled=\{busy\}/);
-  assert.doesNotMatch(uploadPage, /fileInputRef|diagnosticsEnabled|\.click\(\)/);
+  assert.doesNotMatch(uploadPage, /diagnosticsEnabled|\.click\(\)/);
+  assert.doesNotMatch(picker[1], /onChange=/);
+  assert.match(uploadPage, /input\.addEventListener\("change", handleNativeFileChange, true\)/);
+  assert.match(uploadPage, /previousInput\.removeEventListener\("change", handleNativeFileChange, true\)/);
 });
 
 test("native file selection and drag-and-drop use the same validation and state handler", async () => {
@@ -34,8 +38,8 @@ test("native file selection and drag-and-drop use the same validation and state 
   assert.match(uploadPage, /onDragOver=\{\(event\) => \{ event\.preventDefault\(\); setDragging\(true\); \}\}/);
   assert.match(uploadPage, /onDragLeave=\{\(\) => setDragging\(false\)\}/);
   assert.match(uploadPage, /onDrop=\{\(event\) => \{\s*event\.preventDefault\(\);\s*setDragging\(false\);\s*if \(!busy && event\.dataTransfer\.files\[0\]\) selectFile\(event\.dataTransfer\.files\[0\]\);\s*\}\}/);
-  assert.match(uploadPage, /if \(candidate\) selectFile\(candidate, event\.target\)/);
-  assert.match(uploadPage, /function selectFile\(candidate, input\) \{/);
+  assert.match(uploadPage, /const handleNativeFileChange = useCallback\(\(event\) => \{\s*const input = event\.currentTarget;\s*const candidate = input\.files\[0\];\s*if \(candidate\) selectFile\(candidate, input\)/);
+  assert.match(uploadPage, /const selectFile = useCallback\(\(candidate, input\) => \{/);
   assert.match(uploadPage, /const validationError = validateUploadFile\(candidate\)/);
   assert.match(uploadPage, /setFileError\(validationError\)/);
   assert.match(uploadPage, /setFile\(validationError \? null : candidate\)/);
@@ -43,14 +47,15 @@ test("native file selection and drag-and-drop use the same validation and state 
   assert.match(uploadPage, /className="upload-error" role="alert"/);
 });
 
-test("valid dropped file name and size are displayed with a success indicator", async () => {
+test("valid selected file name, size, type, and ready indicator are displayed", async () => {
   const uploadPage = await uploadSource();
 
   assert.match(uploadPage, /\{file \? <>/);
   assert.match(uploadPage, /drop-zone-icon selected/);
-  assert.match(uploadPage, /Document ready/);
+  assert.match(uploadPage, /Document ready to upload/);
   assert.match(uploadPage, /className="selected-file-name"\>\{file\.name\}/);
   assert.match(uploadPage, /className="selected-file-size"\>\{sizeLabel\(file\.size\)\}/);
+  assert.match(uploadPage, /className="selected-file-type"\>\{file\.type \|\| getUploadMimeType\(file\)\}/);
 });
 
 test("upload button stays disabled until a valid file is selected", async () => {
@@ -62,7 +67,7 @@ test("upload button stays disabled until a valid file is selected", async () => 
 
 test("native input resets after valid or invalid selections for same-file reselection", async () => {
   const uploadPage = await uploadSource();
-  const selection = uploadPage.match(/function selectFile\(candidate, input\) \{([\s\S]*?)\n  \}/);
+  const selection = uploadPage.match(/const selectFile = useCallback\(\(candidate, input\) => \{([\s\S]*?)\n  \}, \[\]\);/);
 
   assert.ok(selection, "shared file selection handler should be present");
   assert.ok(

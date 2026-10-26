@@ -18,20 +18,33 @@ test("login, registration, and invitation password field can be shown and hidden
   assert.doesNotMatch(authScreen, /console\.|localStorage|sessionStorage/);
 });
 
-test("page scrollbar is on the left while page content stays left-to-right", async () => {
+test("page uses normal left-to-right document scrolling without a global RTL scroller", async () => {
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const htmlRule = css.match(/html\s*\{([^}]*)\}/)?.[1] ?? "";
   const bodyRule = css.match(/body\s*\{([^}]*)\}/)?.[1] ?? "";
   const rootRule = css.match(/#root\s*\{([^}]*)\}/)?.[1] ?? "";
 
-  assert.match(htmlRule, /direction:\s*rtl/);
-  assert.match(htmlRule, /overflow:\s*hidden/);
+  assert.match(htmlRule, /direction:\s*ltr/);
+  assert.match(htmlRule, /overflow-x:\s*hidden/);
   assert.match(bodyRule, /direction:\s*ltr/);
-  assert.match(bodyRule, /overflow:\s*hidden/);
-  assert.match(rootRule, /direction:\s*rtl/);
-  assert.match(rootRule, /overflow-y:\s*auto/);
-  assert.match(rootRule, /scrollbar-gutter:\s*stable/);
-  assert.match(rootRule, /scroll-behavior:\s*smooth/);
-  assert.match(css, /#root\s*>\s*\*\s*\{\s*direction:\s*ltr/);
-  assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*#root\s*\{\s*scroll-behavior:\s*auto/);
+  assert.match(bodyRule, /overflow-x:\s*hidden/);
+  assert.match(rootRule, /direction:\s*ltr/);
+  assert.doesNotMatch(rootRule, /^\s*height:|overflow-y:\s*auto/m);
+});
+
+test("desktop sidebar has its own right-edge themed vertical scrollbar and mobile layout releases it", async () => {
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const sidebarRule = css.match(/\.sidebar\s*\{([^}]*)\}/)?.[1] ?? "";
+  const mobileRules = css.slice(css.indexOf("@media (max-width: 760px)"), css.indexOf("@media (max-width: 560px)"));
+
+  assert.match(sidebarRule, /position:\s*fixed/);
+  assert.match(sidebarRule, /height:\s*100vh/);
+  assert.match(sidebarRule, /overflow-x:\s*hidden/);
+  assert.match(sidebarRule, /overflow-y:\s*auto/);
+  assert.match(sidebarRule, /overscroll-behavior:\s*contain/);
+  assert.match(sidebarRule, /scrollbar-width:\s*thin/);
+  assert.match(sidebarRule, /scrollbar-color:\s*#7188c5\s+#182437/);
+  assert.match(css, /\.sidebar::-webkit-scrollbar\s*\{\s*width:\s*8px/);
+  assert.match(css, /\.sidebar::-webkit-scrollbar-thumb\s*\{\s*background:\s*#7188c5/);
+  assert.match(mobileRules, /\.sidebar\s*\{[^}]*height:\s*auto;[^}]*overflow:\s*visible/);
 });
