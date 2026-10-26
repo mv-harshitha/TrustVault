@@ -24,12 +24,11 @@ test("upload page presents a keyboard-focusable drop target and visible native f
   assert.match(picker[1], /type="file"/);
   assert.match(picker[1], /aria-label="Browse Files"/);
   assert.match(picker[1], /accept="\.pdf,\.png,\.jpg,\.jpeg,application\/pdf,image\/png,image\/jpeg"/);
-  assert.match(picker[1], /ref=\{attachFileInput\}/);
+  assert.match(picker[1], /onChange=\{handleNativeFileChange\}/);
   assert.match(picker[1], /disabled=\{busy\}/);
   assert.doesNotMatch(uploadPage, /diagnosticsEnabled|\.click\(\)/);
-  assert.doesNotMatch(picker[1], /onChange=/);
-  assert.match(uploadPage, /input\.addEventListener\("change", handleNativeFileChange, true\)/);
-  assert.match(uploadPage, /previousInput\.removeEventListener\("change", handleNativeFileChange, true\)/);
+  assert.doesNotMatch(uploadPage, /addEventListener/);
+  assert.doesNotMatch(uploadPage, /attachFileInput/);
 });
 
 test("native file selection and drag-and-drop use the same validation and state handler", async () => {

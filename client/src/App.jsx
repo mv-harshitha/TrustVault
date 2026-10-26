@@ -386,7 +386,6 @@ export function UploadPage({ onUploaded, onError }) {
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState("");
   const [progress, setProgress] = useState(null);
-  const fileInputRef = useRef(null);
   const uploadInProgressRef = useRef(false);
 
   const selectFile = useCallback((candidate, input) => {
@@ -401,13 +400,6 @@ export function UploadPage({ onUploaded, onError }) {
     const candidate = input.files[0];
     if (candidate) selectFile(candidate, input);
   }, [selectFile]);
-
-  const attachFileInput = useCallback((input) => {
-    const previousInput = fileInputRef.current;
-    if (previousInput) previousInput.removeEventListener("change", handleNativeFileChange, true);
-    fileInputRef.current = input;
-    if (input) input.addEventListener("change", handleNativeFileChange, true);
-  }, [handleNativeFileChange]);
 
   function handlePaste(event) {
     if (busy) return;
@@ -480,12 +472,12 @@ export function UploadPage({ onUploaded, onError }) {
         <span className="browse-file-label" id="browse-file-label">Browse Files</span>
         <input
           className="browse-file-input"
-          ref={attachFileInput}
           type="file"
           accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
           aria-label="Browse Files"
           aria-describedby="browse-file-label"
           disabled={busy}
+          onChange={handleNativeFileChange}
         />
       </div>
     </div>
