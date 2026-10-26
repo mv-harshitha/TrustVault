@@ -5,7 +5,9 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true, select: false },
     name: { type: String, required: true, trim: true, maxlength: 100 },
-    authVersion: { type: Number, default: 0, select: false }
+    authVersion: { type: Number, default: 0, select: false },
+    disabled: { type: Boolean, default: false },
+    avatar: { type: String, default: "", maxlength: 3000000 }
   },
   { timestamps: true }
 );

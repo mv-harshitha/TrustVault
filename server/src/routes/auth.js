@@ -9,7 +9,7 @@ import WorkspaceInvite from "../models/WorkspaceInvite.js";
 import { asyncHandler, httpError } from "../middleware/errors.js";
 import { clearSessionCookie, requireAuth, setSessionCookie } from "../middleware/auth.js";
 import { recordAudit } from "../services/audit.js";
-import { acceptInviteSchema, loginSchema, registerSchema } from "../validators/index.js";
+import { acceptInviteSchema, loginSchema, passwordChangeSchema, profileUpdateSchema, registerSchema } from "../validators/index.js";
 
 const router = Router();
 const registrationLimiter = rateLimit({
@@ -121,10 +121,38 @@ router.post("/logout", requireAuth, asyncHandler(async (req, res) => {
 
 router.get("/me", requireAuth, (req, res) => {
   res.json({
-    user: { id: req.user._id, name: req.user.name, email: req.user.email },
+    user: { id: req.user._id, name: req.user.name, email: req.user.email, avatar: req.user.avatar || "", disabled: Boolean(req.user.disabled) },
     role: req.membership.role,
     company: { id: req.membership.company._id, name: req.membership.company.name }
   });
 });
+
+router.patch("/me", requireAuth, asyncHandler(async (req, res) => {
+  const input = profileUpdateSchema.parse(req.body);
+  if (input.email && input.email.toLowerCase() !== req.user.email) {
+    if (await User.exists({ email: input.email.toLowerCase(), _id: { $ne: req.user._id } })) throw httpError(409, "That email is already in use");
+  }
+  if (input.name !== undefined) req.user.name = input.name;
+  if (input.email !== undefined) req.user.email = input.email.toLowerCase();
+  if (input.avatar !== undefined) req.user.avatar = input.avatar;
+  await req.user.save();
+  await recordAudit(req, { action: "profile.update", outcome: "success", metadata: { fields: Object.keys(input) } });
+  res.json({ user: { id: req.user._id, name: req.user.name, email: req.user.email, avatar: req.user.avatar || "" } });
+}));
+
+router.post("/me/password", requireAuth, asyncHandler(async (req, res) => {
+  const input = passwordChangeSchema.parse(req.body);
+  const user = await User.findById(req.user._id).select("+passwordHash +authVersion");
+  if (!user || !(await bcrypt.compare(input.currentPassword, user.passwordHash))) {
+    await recordAudit(req, { action: "auth.password.change", outcome: "failure", metadata: { reason: "invalid_current_password" } });
+    throw httpError(400, "Current password is incorrect");
+  }
+  user.passwordHash = await bcrypt.hash(input.newPassword, 12);
+  user.authVersion = (user.authVersion || 0) + 1;
+  await user.save();
+  setSessionCookie(res, user._id, user.authVersion);
+  await recordAudit(req, { action: "auth.password.change", outcome: "success" });
+  res.status(204).end();
+}));
 
 export default router;

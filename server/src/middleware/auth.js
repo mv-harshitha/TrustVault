@@ -113,6 +113,10 @@ export const requireAuth = asyncHandler(async (req, res, next) => {
     if (!await auditUnauthenticatedDocumentRequest(req, res, "unknown_session_user")) return;
     throw httpError(401, "Invalid session");
   }
+  if (user.disabled) {
+    if (!await auditUnauthenticatedDocumentRequest(req, res, "disabled_account")) return;
+    throw httpError(403, "Account is disabled");
+  }
   req.user = user;
   if (claims.ver !== user.authVersion) {
     if (!await auditUnauthenticatedDocumentRequest(req, res, "revoked_session")) return;

@@ -2,12 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, downloadFile, getDocumentFile, uploadDocument } from "./api.js";
 import { sessionChanged, watchSession } from "./session.js";
 import { getUploadMimeType, validateUploadFile } from "./upload.js";
+import { AdminDashboard } from "./adminPage.jsx";
+import { ProfileSettings } from "./profilePage.jsx";
+import { AccountSettings } from "./accountPage.jsx";
 
 const navItems = [
   ["overview", "Overview", "◫"],
+  ["dashboard", "Admin dashboard", "▣"],
   ["documents", "My documents", "▤"],
   ["shared", "Shared with me", "↗"],
   ["upload", "Upload document", "+"],
+  ["profile", "Profile", "◎"],
+  ["settings", "Account settings", "⚙"],
   ["audit", "Audit trail", "◷"],
   ["members", "Workspace members", "♙"]
 ];
@@ -231,7 +237,7 @@ export default function App() {
         <nav aria-label="Workspace navigation">
           <span className="nav-heading">WORKSPACE</span>
           {navItems.map(([key, label, icon]) => {
-            if ((key === "audit" || key === "members") && account.role !== "admin") return null;
+            if ((key === "audit" || key === "members" || key === "dashboard") && account.role !== "admin") return null;
             return <button key={key} className={`nav-link ${page === key ? "active" : ""}`} aria-current={page === key ? "page" : undefined} onClick={() => { setPage(key); setSelected(null); }}><span className="nav-icon" aria-hidden="true">{icon}</span><span className="nav-label">{label}</span>{key === "upload" && <span className="nav-plus" aria-hidden="true">↗</span>}</button>;
           })}
         </nav>
@@ -252,7 +258,10 @@ export default function App() {
           {preview && <div className="preview-overlay" role="dialog" aria-modal="true" aria-label={`Preview ${preview.filename}`}><div className="preview-dialog"><div className="preview-toolbar"><strong>{preview.filename}</strong><button className="icon-button" onClick={closePreview} aria-label="Close preview">×</button></div><iframe title={`Document preview: ${preview.filename}`} src={preview.url} /></div></div>}
           {notice && <div role="status" className="notice"><span>{notice}</span><button onClick={() => setNotice("")} aria-label="Dismiss notification">×</button></div>}
           {page === "overview" && <Overview account={account} documents={documents} events={events} onNavigate={setPage} onOpen={(doc) => { setPage("documents"); openDocument(doc); }} onDownload={downloadDocument} />}
-          {page === "upload" && <UploadPage onUploaded={async () => { await refresh(); setPage("documents"); setNotice("Document uploaded securely"); }} onError={setNotice} />}
+{page === "upload" && <UploadPage onUploaded={async () => { await refresh(); setPage("documents"); setNotice("Document uploaded securely"); }} onError={setNotice} />}
+          {page === "dashboard" && account.role === "admin" && <AdminDashboard onError={setNotice} />}
+           {page === "profile" && <ProfileSettings onError={setNotice} onNotice={setNotice} />}
+           {page === "settings" && <AccountSettings onError={setNotice} onNotice={setNotice} />}
           {(page === "documents" || page === "shared") && (selected
             ? <DocumentDetails document={selected} permissions={permissions} events={documentEvents} account={account} sessionEpochRef={sessionEpochRef} onBack={() => setSelected(null)} onView={viewDocument} onDownload={downloadDocument} onDelete={deleteDocument} onUpdate={updateDocument} onError={setNotice} onPermissions={setPermissions} />
             : <DocumentsPage title={page === "shared" ? "Shared with me" : "My documents"} subtitle={page === "shared" ? "Documents other workspace members have shared with you." : "Documents you own and manage."} documents={filteredDocs} filters={filters} setFilters={setFilters} busy={busy} onOpen={openDocument} onDownload={downloadDocument} />)}
