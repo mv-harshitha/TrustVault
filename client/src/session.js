@@ -15,9 +15,9 @@ export function watchSession({ loadSession, onSession, onChecking, windowTarget,
   let requestId = 0;
   let stopped = false;
 
-  async function revalidate() {
+  async function revalidate(silent = false) {
     const currentRequest = ++requestId;
-    onChecking(true);
+    if (!silent) onChecking(true);
 
     let session = false;
     try {
@@ -28,13 +28,16 @@ export function watchSession({ loadSession, onSession, onChecking, windowTarget,
 
     if (stopped || currentRequest !== requestId) return null;
     onSession(session);
-    onChecking(false);
+    if (!silent) onChecking(false);
     return session;
   }
 
-  const handleFocus = () => { void revalidate(); };
+  // Revalidate silently on focus/visibility changes so transient browser
+  // events (such as the native file picker closing and returning focus)
+  // do not unmount the active page or show the boot screen.
+  const handleFocus = () => { void revalidate(true); };
   const handleVisibilityChange = () => {
-    if (documentTarget.visibilityState === "visible") void revalidate();
+    if (documentTarget.visibilityState === "visible") void revalidate(true);
   };
 
   windowTarget.addEventListener("focus", handleFocus);
