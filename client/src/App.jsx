@@ -31,7 +31,6 @@ export default function App() {
   const sessionObserverRef = useRef(null);
   const sessionEpochRef = useRef(0);
   const [busy, setBusy] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [filters, setFilters] = useState({ name: "", owner: "", category: "", dateFrom: "", dateTo: "" });
@@ -301,7 +300,39 @@ export function AuthScreen({ onSuccess }) {
       {mode === "register" && <label>Company name<input name="companyName" required minLength="2" maxLength="120" placeholder="Acme Studio" /></label>}
       {mode === "join" && <label>Invitation code<input name="invitationCode" required minLength="32" maxLength="128" autoComplete="off" placeholder="Paste your workspace invitation code" /></label>}
       <label>Work email<input name="email" type="email" required autoComplete="email" placeholder="you@company.com" /></label>
-      <label>Password<input name="password" type="password" required minLength={mode === "login" ? 1 : 10} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder={mode === "login" ? "Your password" : "At least 10 characters"} /></label>
+      <label>Password
+        <span className="password-input-wrap">
+          <input
+            name="password"
+            type={showPassword ? "text" : "password"}
+            required
+            minLength={mode === "login" ? 1 : 10}
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            placeholder={mode === "login" ? "Your password" : "At least 10 characters"}
+          />
+          <button
+            className="password-toggle-btn"
+            type="button"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            aria-pressed={showPassword}
+            onClick={() => setShowPassword((visible) => !visible)}
+          >
+            {showPassword ? (
+              <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 3l18 18" />
+                <path d="M10.6 10.6a2 2 0 002.8 2.8" />
+                <path d="M9.9 5.2A10.8 10.8 0 0112 5c5 0 8.5 4.5 9.5 7-.4 1-1.1 2-2 2.9" />
+                <path d="M6.2 6.2C3.8 7.6 2.5 10 2 12c1 2.5 4.5 7 10 7 1.2 0 2.3-.2 3.3-.6" />
+              </svg>
+            ) : (
+              <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" />
+                <circle cx="12" cy="12" r="2.5" />
+              </svg>
+            )}
+          </button>
+        </span>
+      </label>
       {error && <div className="form-error" role="alert">{error}</div>}
       <button className="primary-button full-button" disabled={busy}>{busy ? "Please wait..." : mode === "login" ? "Sign in securely" : mode === "join" ? "Join workspace" : "Create workspace"} <span>→</span></button>
       <div className="auth-switch">{mode === "login" ? "New to TrustVault?" : mode === "join" ? "Don't have an invitation?" : "Already have an account?"} <button type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}>{mode === "login" ? "Create an account" : "Sign in"}</button></div>
@@ -352,7 +383,6 @@ export function UploadPage({ onUploaded, onError }) {
   const [file, setFile] = useState(null);
   const [category, setCategory] = useState("Other");
   const [busy, setBusy] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState("");
   const [progress, setProgress] = useState(null);

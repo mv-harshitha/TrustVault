@@ -17,6 +17,7 @@
 html {
   direction: rtl;
   overflow-x: hidden;
+  scroll-behavior: smooth;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: #c2c9d8 #f1f3f9;
@@ -637,6 +638,10 @@ label { gap: 7px; color: #4d5870; font-size: 11px; }
 .form-error { border-color: #f1d8d5; background: #fff2f0; color: #993c3a; padding: 11px 12px; }
 .boot-screen { color: #747e94; }
 .boot-screen .brand-mark { color: #fff; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
 
 @media (max-width: 1050px) {
   .sidebar { width: 232px; }
